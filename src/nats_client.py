@@ -209,10 +209,8 @@ class StreamProcessorNatsClient:
                 processing_errors_total.labels(error_type="json_parse").inc()
                 await msg.ack()
                 return
-
-            posts_processed_total.inc()
             
-            # Call the message handler
+            # Call the message handler (it will increment posts_processed_total)
             if self._message_handler:
                 await self._message_handler(data)
             

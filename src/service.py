@@ -97,6 +97,8 @@ class StreamProcessorService:
         start_time = time.time()
         
         try:
+            # Count every message we attempt to process
+            posts_processed_total.inc()
             logger.debug("Processing message")
             
             # Extract text for sentiment analysis
@@ -118,7 +120,6 @@ class StreamProcessorService:
                     # Update metrics
                     processing_time = time.time() - start_time
                     processing_duration_seconds.observe(processing_time)
-                    posts_processed_total.inc()
                     
                     logger.debug("Message processed", 
                                 sentiment=sentiment_result["sentiment"],
