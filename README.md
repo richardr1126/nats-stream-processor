@@ -2,6 +2,44 @@
 
 A high-performance Python microservice for processing Bluesky posts with Twitter RoBERTa sentiment analysis using ONNX Runtime for fast CPU inference. This service subscribes to NATS JetStream, performs sentiment classification, and publishes enriched data for real-time dashboards.
 
+## 🚀 Quickstart
+
+### Local Development (Docker)
+
+```bash
+# Start NATS and stream processor with docker compose watch for live reloading
+docker compose watch
+```
+
+### Local Development (Python)
+
+```bash
+# uv is the recommended way to install dependencies
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Install dependencies and run
+uv sync --frozen
+source .venv/bin/activate
+python main.py
+```
+
+### Kubernetes Deployment
+
+```bash
+# Clone the repository
+git clone https://github.com/richardr1126/nats-stream-processor.git
+cd nats-stream-processor
+
+# Configure environment variables
+cp charts/.env.example charts/.env
+# Edit charts/.env with your NATS configuration
+
+# Deploy to Kubernetes
+cd charts
+./create-secrets.sh
+helm install nats-stream-processor ./nats-stream-processor
+```
+
 ## 🚀 Features
 
 - **Real-time Stream Processing**: Consumes posts from NATS JetStream with backpressure handling
@@ -13,60 +51,6 @@ A high-performance Python microservice for processing Bluesky posts with Twitter
 - **Containerized**: Docker image with model caching and optimization
 - **Observable**: Comprehensive metrics for processing rate, sentiment distribution, and performance
 - **Mock Data Support**: Built-in mock data generator for testing and development
-
-## 📋 Prerequisites
-
-- Python 3.13+
-- Docker (for containerization)
-- Kubernetes cluster with NATS JetStream deployed
-- uv package manager
-- Input stream (bluesky-posts) created by nats-firehose-ingest
-
-## 🛠 Installation
-
-### Local Development
-
-1. **Clone and setup**:
-   ```bash
-   cd nats-stream-processor
-   uv sync
-   ```
-
-2. **Configure environment**:
-   ```bash
-   cp .env.example .env.local
-   # Edit .env.local with your configuration
-   ```
-
-3. **Run locally**:
-   ```bash
-   # Load environment
-   source .env.local
-   uv run python main.py
-   ```
-
-### Docker Build
-
-```bash
-# Build the container
-docker build -t nats-stream-processor:latest .
-
-# Run with environment variables
-docker run -e NATS_URL=nats://your-nats:4222 nats-stream-processor:latest
-```
-
-### Docker Compose (for Testing)
-
-```bash
-# Start NATS and mock data generator with stream processor
-docker-compose up -d
-
-# View logs
-docker-compose logs -f nats-stream-processor
-
-# Access NATS box for debugging
-docker-compose run --rm nats-box
-```
 
 ## ⚙️ Configuration
 
