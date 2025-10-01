@@ -10,8 +10,10 @@ from .config import settings
 from .logging_setup import get_logger
 from .metrics import (
     posts_processed_total,
+    posts_published_total,
     processing_duration_seconds,
     message_queue_size,
+    sentiment_predictions_total,
 )
 from .nats_client import StreamProcessorNatsClient
 from .sentiment import sentiment_analyzer
@@ -156,6 +158,8 @@ class StreamProcessorService:
     async def _periodic_stats_logger(self):
         """Log periodic statistics."""
         last_processed_count = 0
+        last_published_count = 0
+        last_pending_count = 0
         
         while not self.stop_event.is_set():
             try:
@@ -166,14 +170,45 @@ class StreamProcessorService:
                 
                 # Calculate processing rate since last log
                 current_processed = posts_processed_total._value.get()
+                current_published = posts_published_total._value.get()
+                
                 messages_per_20s = current_processed - last_processed_count
                 messages_per_second = messages_per_20s / 20.0
-                last_processed_count = current_processed
+                
+                published_per_20s = current_published - last_published_count
+                published_per_second = published_per_20s / 20.0
+                
+                # Calculate backlog change
+                backlog_change = pending_count - last_pending_count if last_pending_count > 0 else 0
+                
+                # Get sentiment distribution
+                positive_count = sentiment_predictions_total.labels(sentiment="positive")._value.get()
+                negative_count = sentiment_predictions_total.labels(sentiment="negative")._value.get()
+                neutral_count = sentiment_predictions_total.labels(sentiment="neutral")._value.get()
+                
+                # Calculate publish rate (percentage of processed that were published)
+                publish_rate = (published_per_20s / messages_per_20s * 100) if messages_per_20s > 0 else 0
                 
                 logger.info("processor stats",
+                           # Processing rates
+                           processed_per_sec=round(messages_per_second, 2),
+                           published_per_sec=round(published_per_second, 2),
+                           publish_rate_pct=round(publish_rate, 1),
+                           # Backlog status
                            pending_messages=pending_count,
-                           total_processed=current_processed,
-                           messages_per_second=round(messages_per_second, 2))
+                           backlog_change=backlog_change,
+                           # Cumulative totals
+                           total_processed=int(current_processed),
+                           total_published=int(current_published),
+                           # Sentiment distribution (cumulative)
+                           sentiment_pos=int(positive_count),
+                           sentiment_neg=int(negative_count),
+                           sentiment_neu=int(neutral_count))
+                
+                # Update for next iteration
+                last_processed_count = current_processed
+                last_published_count = current_published
+                last_pending_count = pending_count
                 
             except Exception as e:
                 logger.warning("Failed to log stats", error=str(e))
