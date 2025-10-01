@@ -42,6 +42,15 @@ spec:
             - name: http
               containerPort: {{ .Values.service.targetPort }}
               protocol: TCP
+          env:
+            - name: HOME
+              value: "/home/appuser"
+            - name: HF_HOME
+              value: "{{ .Values.volumes.modelCache.mountPath }}"
+            - name: TRANSFORMERS_CACHE
+              value: "{{ .Values.volumes.modelCache.mountPath }}"
+            - name: TMPDIR
+              value: "{{ .Values.volumes.tmp.mountPath }}"
           {{- with .Values.envFrom }}
           envFrom:
             {{- toYaml . | nindent 12 }}
@@ -58,11 +67,19 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if .Values.volumes.modelCache.enabled }}
           volumeMounts:
+            {{- if .Values.volumes.modelCache.enabled }}
             - name: model-cache
               mountPath: {{ .Values.volumes.modelCache.mountPath }}
-          {{- end }}
+            {{- end }}
+            {{- if .Values.volumes.tmp.enabled }}
+            - name: tmp
+              mountPath: {{ .Values.volumes.tmp.mountPath }}
+            {{- end }}
+            {{- if .Values.volumes.home.enabled }}
+            - name: home
+              mountPath: {{ .Values.volumes.home.mountPath }}
+            {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -75,8 +92,8 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- if .Values.volumes.modelCache.enabled }}
       volumes:
+        {{- if .Values.volumes.modelCache.enabled }}
         - name: model-cache
           {{- if eq .Values.volumes.modelCache.type "emptyDir" }}
           emptyDir:
@@ -85,4 +102,14 @@ spec:
           persistentVolumeClaim:
             claimName: {{ include "nats-stream-processor.fullname" . }}-model-cache
           {{- end }}
-      {{- end }}
+        {{- end }}
+        {{- if .Values.volumes.tmp.enabled }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ .Values.volumes.tmp.size }}
+        {{- end }}
+        {{- if .Values.volumes.home.enabled }}
+        - name: home
+          emptyDir:
+            sizeLimit: {{ .Values.volumes.home.size }}
+        {{- end }}

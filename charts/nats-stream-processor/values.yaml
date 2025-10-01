@@ -2,7 +2,7 @@
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 
-replicaCount: 1
+replicaCount: 3
 
 image:
   repository: ghcr.io/richardr1126/nats-stream-processor
@@ -42,8 +42,11 @@ service:
 
 resources:
   requests:
-    memory: "256Mi"
-    cpu: "100m"
+    memory: "512Mi"
+    cpu: "500m"
+  limits:
+    memory: "768Mi"
+    cpu: 1
 
 livenessProbe:
   httpGet:
@@ -79,7 +82,24 @@ volumes:
     # Only used if type is persistentVolumeClaim
     storageClass: ""  # Use default storage class
     accessMode: "ReadWriteOnce"
+  # Temporary directory volume (required for PyTorch/dill with read-only filesystem)
+  tmp:
+    enabled: true
+    size: "1Gi"
+    mountPath: "/tmp"
+  # Home directory volume (required for user-level cache with read-only filesystem)
+  home:
+    enabled: true
+    size: "512Mi"
+    mountPath: "/home/appuser"
 
-nodeSelector: {}
-tolerations: []
+nodeSelector:
+  cloud.google.com/gke-nodepool: "ml-pool"
+
+tolerations:
+  - key: "dedicated"
+    operator: "Equal"
+    value: "ml"
+    effect: "NoSchedule"
+
 affinity: {}

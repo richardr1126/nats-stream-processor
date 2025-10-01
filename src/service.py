@@ -170,7 +170,7 @@ class StreamProcessorService:
                 messages_per_second = messages_per_30s / 30.0
                 last_processed_count = current_processed
                 
-                logger.info("stats",
+                logger.info("processor stats",
                            pending_messages=pending_count,
                            total_processed=current_processed,
                            messages_per_second=round(messages_per_second, 2))

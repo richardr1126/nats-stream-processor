@@ -11,6 +11,8 @@ class Settings:
     INPUT_SUBJECT: str = os.getenv("INPUT_SUBJECT", "bluesky.posts")
     OUTPUT_SUBJECT: str = os.getenv("OUTPUT_SUBJECT", "bluesky.posts.sentiment")
     CONSUMER_NAME: str = os.getenv("CONSUMER_NAME", "sentiment-processor")
+    # Queue group for load-balanced consumption across replicas. Defaults to CONSUMER_NAME
+    QUEUE_GROUP: str = os.getenv("QUEUE_GROUP", os.getenv("CONSUMER_NAME", "sentiment-processor"))
     NUM_STREAM_REPLICAS: int = int(os.getenv("NUM_STREAM_REPLICAS", 1))
 
     # Service

@@ -8,6 +8,7 @@ A high-performance Python microservice for processing Bluesky posts with Twitter
 
 ```bash
 # Start NATS and stream processor with docker compose watch for live reloading
+# Uses .env.local for local development configuration
 docker compose watch
 ```
 
@@ -30,9 +31,11 @@ python main.py
 git clone https://github.com/richardr1126/nats-stream-processor.git
 cd nats-stream-processor
 
+```bash
 # Configure environment variables
 cp charts/.env.example charts/.env
 # Edit charts/.env with your NATS configuration
+# Note: Production uses 'bluesky-posts' stream, local development uses 'bluesky-posts-dev'
 
 # Deploy to Kubernetes
 cd charts
@@ -63,6 +66,7 @@ Configure the service using environment variables:
 - `INPUT_SUBJECT`: Input subject pattern (default: `bluesky.posts`)
 - `OUTPUT_SUBJECT`: Output subject prefix (default: `bluesky.posts.sentiment`)
 - `CONSUMER_NAME`: JetStream consumer name (default: `sentiment-processor`)
+- `QUEUE_GROUP`: Queue group name used for load-balanced consumption across replicas (default: same as `CONSUMER_NAME`)
 
 ### Processing Settings
 - `PROCESSING_TIMEOUT`: Max seconds to wait for processing completion (default: `30`)
@@ -71,7 +75,7 @@ Configure the service using environment variables:
 
 ### Sentiment Model Settings
 - `MODEL_NAME`: HuggingFace model name (default: `onnx-community/twitter-roberta-base-sentiment-ONNX`)
-- `MODEL_CACHE_DIR`: Local model cache directory (default: `./models`)
+- `MODEL_CACHE_DIR`: Local model cache directory (default: `/var/cache/models`)
 - `MAX_SEQUENCE_LENGTH`: Maximum text sequence length (default: `512`)
 - `CONFIDENCE_THRESHOLD`: Minimum confidence to publish results (default: `0.4`)
 
@@ -217,7 +221,11 @@ The service uses **Twitter RoBERTa** fine-tuned for sentiment analysis:
 
 1. **Start the full stack**:
    ```bash
+   # For local development with mock data
    docker-compose up -d
+   
+   # For live development with auto-reload
+   docker-compose watch
    ```
 
 2. **Monitor processing**:
@@ -237,11 +245,11 @@ The service uses **Twitter RoBERTa** fine-tuned for sentiment analysis:
    # List streams
    nats stream list
    
-   # View messages in input stream (development)
+   # View messages in input stream (development uses -dev suffix)
    nats stream view bluesky-posts-dev
    
-   # View messages in output stream
-   nats stream view bluesky-posts-sentiment
+   # View messages in output stream (development)
+   nats stream view bluesky-posts-sentiment-dev
    ```
 
 ### Performance Tuning
@@ -313,6 +321,9 @@ The service can be deployed using Helm charts or by building custom Kubernetes m
 2. **No Input Messages**:
    ```bash
    # Check if input stream exists and has messages
+   # For local development
+   kubectl exec -it deployment/nats-box -- nats stream info bluesky-posts-dev
+   # For production
    kubectl exec -it deployment/nats-box -n nats -- nats stream info bluesky-posts
    ```
 
@@ -339,6 +350,9 @@ kubectl logs deployment/nats-stream-processor | jq 'select(.level=="debug")'
 
 # Check consumer lag
 kubectl exec -it deployment/nats-box -n nats -- nats consumer info bluesky-posts sentiment-processor
+
+# For local development
+docker-compose exec nats-box nats consumer info bluesky-posts-dev sentiment-processor-dev
 
 # Monitor metrics
 kubectl port-forward svc/nats-stream-processor 8080:8080 &
@@ -370,9 +384,23 @@ This service integrates with:
 
 ## 📈 Scaling
 
-- **Horizontal**: Deploy multiple instances with different consumer names
+- **Horizontal (recommended)**: Run multiple replicas using the same durable consumer (`CONSUMER_NAME`) and a shared queue group (`QUEUE_GROUP`). The service will bind to the durable and use queue semantics so each message is delivered to only one replica.
 - **Vertical**: Increase CPU/memory limits for higher throughput
 - **Model**: Consider GPU deployment for very high throughput (requires CUDA ONNX provider)
+
+### Multi-pod setup with JetStream durables and queue groups
+
+This service is configured to safely scale horizontally without consumer name conflicts by using a single durable consumer and a shared queue group:
+
+1. All pods use the same `CONSUMER_NAME` (durable) and the same `QUEUE_GROUP`.
+2. On startup, each pod attempts to bind to the durable; if it doesn't exist yet, one pod will create it.
+3. Messages are delivered once to the queue group, and N pods share the work.
+
+To verify the consumer setup:
+
+```bash
+kubectl exec -it deployment/nats-box -n nats -- nats consumer info bluesky-posts sentiment-processor
+```
 
 ## 🤝 Contributing
 

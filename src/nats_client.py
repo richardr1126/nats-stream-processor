@@ -4,7 +4,7 @@ from typing import Optional, Dict, Any, Callable
 
 from nats.aio.client import Client as NATS
 from nats.js import JetStreamContext
-from nats.js.api import StreamConfig, RetentionPolicy, DiscardPolicy, StorageType, ConsumerConfig, DeliverPolicy
+from nats.js.api import StreamConfig, RetentionPolicy, DiscardPolicy, StorageType, ConsumerConfig, DeliverPolicy, AckPolicy
 from nats.errors import TimeoutError
 from nats.aio.msg import Msg
 
@@ -32,6 +32,8 @@ class StreamProcessorNatsClient:
         self.input_subject = settings.INPUT_SUBJECT
         self.output_subject = settings.OUTPUT_SUBJECT
         self.consumer_name = settings.CONSUMER_NAME
+        # Queue group enables multiple pods to share one durable consumer
+        self.queue_group = settings.QUEUE_GROUP
         self.max_retries = settings.MAX_RETRIES
         self.stream_num_replicas = settings.NUM_STREAM_REPLICAS
 
@@ -124,30 +126,59 @@ class StreamProcessorNatsClient:
         try:
             logger.info("Setting up subscription", 
                        stream=self.input_stream, 
-                       consumer=self.consumer_name)
-            
-            # Create or get consumer
-            consumer_config = ConsumerConfig(
-                name=self.consumer_name,
-                durable_name=self.consumer_name,
-                deliver_policy=DeliverPolicy.ALL,
-                ack_policy="explicit",
-                max_deliver=3,
-                ack_wait=30,  # 30 seconds to process and ack
-            )
-            
-            # Subscribe to the stream
-            self._subscription = await self.js.subscribe(
-                subject=f"{self.input_subject}.>",
-                stream=self.input_stream,
-                config=consumer_config,
-                cb=self._handle_message,
-                manual_ack=True,
-            )
-            
-            logger.info("Subscription established", 
-                       stream=self.input_stream, 
-                       consumer=self.consumer_name)
+                       consumer=self.consumer_name,
+                       queue_group=self.queue_group)
+
+            subject = f"{self.input_subject}.>"
+
+            # First try to bind to an existing durable consumer (typical for multi-pod)
+            try:
+                self._subscription = await self.js.subscribe(
+                    subject=subject,
+                    stream=self.input_stream,
+                    durable=self.consumer_name,
+                    queue=self.queue_group,
+                    cb=self._handle_message,
+                    manual_ack=True,
+                )
+                logger.info("Bound to existing durable consumer", stream=self.input_stream, consumer=self.consumer_name, queue_group=self.queue_group)
+            except Exception as bind_err:
+                logger.info("Consumer bind failed, ensuring consumer exists", error=str(bind_err))
+
+                # Create (or ensure) the durable consumer configured for queue group delivery
+                consumer_config = ConsumerConfig(
+                    name=self.consumer_name,
+                    durable_name=self.consumer_name,
+                    deliver_policy=DeliverPolicy.ALL,
+                    ack_policy=AckPolicy.EXPLICIT,
+                    max_deliver=3,
+                    ack_wait=30,  # 30 seconds to process and ack
+                    deliver_group=self.queue_group,
+                    deliver_subject="_INBOX.>",  # Required for queue group delivery
+                    filter_subject=subject,
+                )
+
+                # Attempt to add the consumer; if it already exists due to a race, ignore
+                try:
+                    await self.js.add_consumer(self.input_stream, consumer_config)
+                    logger.info("Created durable consumer", stream=self.input_stream, consumer=self.consumer_name, queue_group=self.queue_group)
+                except Exception as add_err:
+                    logger.info("Consumer may already exist, proceeding to bind", error=str(add_err))
+
+                # Bind again to the durable after ensuring it exists
+                self._subscription = await self.js.subscribe(
+                    subject=subject,
+                    stream=self.input_stream,
+                    durable=self.consumer_name,
+                    queue=self.queue_group,
+                    cb=self._handle_message,
+                    manual_ack=True,
+                )
+
+                logger.info("Subscription established (durable + queue group)",
+                            stream=self.input_stream,
+                            consumer=self.consumer_name,
+                            queue_group=self.queue_group)
             
         except Exception as e:
             logger.error("Failed to set up subscription", error=str(e))
