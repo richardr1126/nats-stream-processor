@@ -159,15 +159,15 @@ class StreamProcessorService:
         
         while not self.stop_event.is_set():
             try:
-                await asyncio.sleep(30)  # Log every 30 seconds
+                await asyncio.sleep(20)  # Log every 20 seconds
                 
                 # Get pending message count
                 pending_count = await self.nats_client.get_pending_message_count()
                 
                 # Calculate processing rate since last log
                 current_processed = posts_processed_total._value.get()
-                messages_per_30s = current_processed - last_processed_count
-                messages_per_second = messages_per_30s / 30.0
+                messages_per_20s = current_processed - last_processed_count
+                messages_per_second = messages_per_20s / 20.0
                 last_processed_count = current_processed
                 
                 logger.info("processor stats",
