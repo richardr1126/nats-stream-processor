@@ -3,6 +3,7 @@ import signal
 import time
 from typing import Any, Dict, List
 from collections import deque
+import random
 
 import uvicorn
 
@@ -164,8 +165,8 @@ class StreamProcessorService:
         
         while not self.stop_event.is_set():
             try:
-                await asyncio.sleep(20)  # Log every 20 seconds
-                
+                await asyncio.sleep(20 + random.uniform(0, 2))  # Log every 20 seconds with slight jitter for replicas
+
                 # Get pending message count
                 pending_count = await self.nats_client.get_pending_message_count()
                 
