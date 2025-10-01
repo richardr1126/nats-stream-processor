@@ -190,21 +190,28 @@ class StreamProcessorService:
                 # Calculate publish rate (percentage of processed that were published)
                 publish_rate = (published_per_20s / messages_per_20s * 100) if messages_per_20s > 0 else 0
                 
-                logger.info("processor stats",
-                           # Processing rates
-                           processed_per_sec=round(messages_per_second, 2),
-                           published_per_sec=round(published_per_second, 2),
-                           publish_rate_pct=round(publish_rate, 1),
-                           # Backlog status
-                           pending_messages=pending_count,
-                           backlog_change=backlog_change,
-                           # Cumulative totals
-                           total_processed=int(current_processed),
-                           total_published=int(current_published),
-                           # Sentiment distribution (cumulative)
-                           sentiment_pos=int(positive_count),
-                           sentiment_neg=int(negative_count),
-                           sentiment_neu=int(neutral_count))
+                # Format stats with multi-line output
+                stats_msg = (
+                    "\n" + "="*30 +
+                    "\n  Stream Processor Statistics" +
+                    "\n" + "="*30 +
+                    "\n  Processing Rates:" +
+                    f"\n    Processed/sec:     {round(messages_per_second, 2)}" +
+                    f"\n    Published/sec:     {round(published_per_second, 2)}" +
+                    f"\n    Publish rate:      {round(publish_rate, 1)}%" +
+                    "\n  Backlog Status:" +
+                    f"\n    Pending messages:  {pending_count}" +
+                    f"\n    Backlog change:    {backlog_change:+d}" +
+                    "\n  Cumulative Totals:" +
+                    f"\n    Total processed:   {int(current_processed)}" +
+                    f"\n    Total published:   {int(current_published)}" +
+                    "\n  Sentiment Distribution:" +
+                    f"\n    Positive:          {int(positive_count)}" +
+                    f"\n    Negative:          {int(negative_count)}" +
+                    f"\n    Neutral:           {int(neutral_count)}" +
+                    "\n" + "="*30
+                )
+                logger.info(stats_msg)
                 
                 # Update for next iteration
                 last_processed_count = current_processed
