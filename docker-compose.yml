@@ -1,0 +1,75 @@
+services:
+  nats:
+    image: nats:2.10-alpine
+    container_name: nats-server
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+      - "6222:6222"
+    command: [
+      "--jetstream",
+      "--store_dir=/data"
+    ]
+    volumes:
+      - nats_data:/data
+
+  # Mock ingest service to generate test data
+  mock-ingest:
+    image: natsio/nats-box:latest
+    container_name: mock-ingest
+    depends_on:
+      - nats
+    environment:
+      NATS_URL: "nats://nats:4222"
+    command:
+      - sh
+      - -c
+      - |
+        sleep 5
+        nats stream add bluesky-posts-dev --subjects="bluesky.posts.dev.>" --defaults
+        while true; do
+          nats pub bluesky.posts.dev.posts '{"uri":"at://test/'$$RANDOM'","text":"This is a great day!","author":"test-user-'$$RANDOM'","timestamp":"'$$(date -Iseconds)'"}';
+          nats pub bluesky.posts.dev.posts '{"uri":"at://test/'$$RANDOM'","text":"I hate this weather","author":"test-user-'$$RANDOM'","timestamp":"'$$(date -Iseconds)'"}';
+          sleep 0.5;
+        done
+
+  nats-stream-processor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nats-stream-processor
+    depends_on:
+      - nats
+      - mock-ingest
+    env_file:
+      - .env.local
+    environment:
+      NATS_URL: "nats://nats:4222"
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    volumes:
+      - model_cache:/app/models
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  nats-box:
+    image: natsio/nats-box:latest
+    container_name: nats-box
+    depends_on:
+      - nats
+    environment:
+      NATS_URL: "nats://nats:4222"
+    profiles:
+      - tools
+    tty: true
+    stdin_open: true
+
+volumes:
+  nats_data:
+    driver: local
+  model_cache:
+    driver: local

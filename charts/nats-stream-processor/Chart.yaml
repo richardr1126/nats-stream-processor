@@ -1,0 +1,17 @@
+apiVersion: v2
+name: nats-stream-processor
+description: A Helm chart for NATS Stream Processor - real-time sentiment processing service
+
+type: application
+
+version: 0.1.0
+
+appVersion: "latest"
+
+keywords:
+  - nats
+  - jetstream
+  - sentiment
+  - stream-processor
+  - real-time
+  - data-processing
