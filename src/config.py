@@ -19,7 +19,7 @@ class Settings:
 
     # Sentiment Model
     MODEL_NAME: str = os.getenv("MODEL_NAME", "onnx-community/twitter-roberta-base-sentiment-ONNX")
-    MODEL_CACHE_DIR: str = os.getenv("MODEL_CACHE_DIR", "./models")
+    MODEL_CACHE_DIR: str = os.getenv("MODEL_CACHE_DIR", "/var/cache/models")
     MAX_SEQUENCE_LENGTH: int = int(os.getenv("MAX_SEQUENCE_LENGTH", 512))
     CONFIDENCE_THRESHOLD: float = float(os.getenv("CONFIDENCE_THRESHOLD", 0.4))
 

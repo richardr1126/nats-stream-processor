@@ -31,4 +31,40 @@
 {{- else if contains "LoadBalancer" .Values.service.type }}
      NOTE: It may take a few minutes for the LoadBalancer IP to be available.
            You can watch its status by running 'kubectl get --namespace {{ .Release.Namespace }} svc -w {{ include "nats-stream-processor.fullname" . }}'
-  export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "nats-stream-processor.fullname" . }} --template "{{"{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}
+  export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "nats-stream-processor.fullname" . }} --template "{{"{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}"}}")
+  
+  ✅ Health Check:     http://$SERVICE_IP:{{ .Values.service.port }}/health
+  📋 Detailed Health:  http://$SERVICE_IP:{{ .Values.service.port }}/health/detailed
+  🎯 Readiness:        http://$SERVICE_IP:{{ .Values.service.port }}/ready
+  📈 Metrics:          http://$SERVICE_IP:{{ .Values.service.port }}/metrics
+{{- end }}
+
+📝 Useful Commands:
+  # View logs
+  kubectl logs --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "nats-stream-processor.name" . }}" -f
+
+  # Get pod status
+  kubectl get pods --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "nats-stream-processor.name" . }}"
+
+  # Check service status
+  kubectl get svc --namespace {{ .Release.Namespace }} {{ include "nats-stream-processor.fullname" . }}
+
+  # View environment variables
+  kubectl get secret --namespace {{ .Release.Namespace }} {{ (index .Values.envFrom 0).secretRef.name | default "nats-stream-processor-env" }} -o yaml
+
+🔧 Configuration:
+  Secret Name: nats-stream-processor-env
+  {{- if .Values.volumes.modelCache.enabled }}
+  Model Cache: {{ .Values.volumes.modelCache.type }} ({{ .Values.volumes.modelCache.size }})
+  {{- else }}
+  Model Cache: Disabled (models downloaded to memory)
+  {{- end }}
+  
+📚 Documentation: https://github.com/richardr1126/nats-stream-processor
+
+💡 Performance Tips:
+  - Enable persistent model cache for faster pod restarts
+  - Increase memory if using emptyDir cache (models ~500MB)
+  - Monitor /metrics endpoint for inference timing
+
+Happy processing! 🧠

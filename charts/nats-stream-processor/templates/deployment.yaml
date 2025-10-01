@@ -58,6 +58,11 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          {{- if .Values.volumes.modelCache.enabled }}
+          volumeMounts:
+            - name: model-cache
+              mountPath: {{ .Values.volumes.modelCache.mountPath }}
+          {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -69,4 +74,15 @@ spec:
       {{- with .Values.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.volumes.modelCache.enabled }}
+      volumes:
+        - name: model-cache
+          {{- if eq .Values.volumes.modelCache.type "emptyDir" }}
+          emptyDir:
+            sizeLimit: {{ .Values.volumes.modelCache.size }}
+          {{- else if eq .Values.volumes.modelCache.type "persistentVolumeClaim" }}
+          persistentVolumeClaim:
+            claimName: {{ include "nats-stream-processor.fullname" . }}-model-cache
+          {{- end }}
       {{- end }}

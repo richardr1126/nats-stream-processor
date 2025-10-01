@@ -1,0 +1,17 @@
+{{- if and .Values.volumes.modelCache.enabled (eq .Values.volumes.modelCache.type "persistentVolumeClaim") -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "nats-stream-processor.fullname" . }}-model-cache
+  labels:
+    {{- include "nats-stream-processor.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - {{ .Values.volumes.modelCache.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.volumes.modelCache.size }}
+  {{- if .Values.volumes.modelCache.storageClass }}
+  storageClassName: {{ .Values.volumes.modelCache.storageClass }}
+  {{- end }}
+{{- end }}

@@ -67,6 +67,19 @@ envFrom:
   - secretRef:
       name: nats-stream-processor-env
 
+# Volume configuration for model cache (required for read-only filesystem)
+volumes:
+  modelCache:
+    enabled: true
+    # Use emptyDir for ephemeral cache (models downloaded on each pod start)
+    # For persistent cache across restarts, use persistentVolumeClaim
+    type: emptyDir  # or "persistentVolumeClaim"
+    size: "2Gi"
+    mountPath: "/var/cache/models"
+    # Only used if type is persistentVolumeClaim
+    storageClass: ""  # Use default storage class
+    accessMode: "ReadWriteOnce"
+
 nodeSelector: {}
 tolerations: []
 affinity: {}
