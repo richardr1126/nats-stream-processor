@@ -127,7 +127,6 @@ class SentimentAnalyzer:
             sentiment_confidence.observe(confidence)
             
             result = {
-                "text": text[:100] + "..." if len(text) > 100 else text,  # Truncate for logging
                 "sentiment": sentiment,
                 "confidence": confidence,
                 "probabilities": probabilities
