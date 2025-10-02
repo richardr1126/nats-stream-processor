@@ -235,9 +235,17 @@ class StreamProcessorService:
         logger.info("Shutting down stream processor service")
         
         try:
-            # Cancel background tasks
+            # First, gracefully shut down the uvicorn server
+            logger.debug("Shutting down health check server")
+            self.server.should_exit = True
+            
+            # Give the server a moment to stop gracefully
+            await asyncio.sleep(0.5)
+            
+            # Cancel remaining background tasks
             for task in self._tasks:
-                task.cancel()
+                if not task.done():
+                    task.cancel()
             
             # Wait for tasks to complete with timeout
             if self._tasks:
