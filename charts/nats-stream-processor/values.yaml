@@ -102,4 +102,21 @@ tolerations:
     value: "ml"
     effect: "NoSchedule"
 
-affinity: {}
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: nats-stream-processor
+          topologyKey: kubernetes.io/hostname
+
+# Topology spread constraints to evenly distribute pods across nodes
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: nats-stream-processor
