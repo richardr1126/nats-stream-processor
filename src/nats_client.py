@@ -3,7 +3,7 @@ import json
 from typing import Optional, Dict, Any, Callable
 
 from nats.aio.client import Client as NATS
-from nats.js import JetStreamContext
+from nats.js import JetStreamContext, api
 from nats.js.api import StreamConfig, RetentionPolicy, DiscardPolicy, StorageType, ConsumerConfig, DeliverPolicy, AckPolicy
 from nats.errors import TimeoutError
 from nats.aio.msg import Msg
@@ -266,15 +266,11 @@ class StreamProcessorNatsClient:
                     # Attempt idempotent publish using headers if supported.
                     # JetStream server will treat messages with same Nats-Msg-Id inside duplicate window as duplicates.
                     headers = None
-                    try:
-                        post_uri = original_post.get("uri") if isinstance(original_post, dict) else None
-                        post_cid = original_post.get("cid") if isinstance(original_post, dict) else None
-                        if post_uri and post_cid:
-                            from nats.aio.client import Headers
-                            headers = Headers()
-                            headers.add("Nats-Msg-Id", f"{post_uri}:{post_cid}")
-                    except Exception:
-                        headers = None
+                    post_uri = original_post.get("uri") if isinstance(original_post, dict) else None
+                    post_cid = original_post.get("cid") if isinstance(original_post, dict) else None
+                    if post_uri and post_cid:
+                        # Use JetStream de-duplication header via enum (api.Header.MSG_ID)
+                        headers = {api.Header.MSG_ID: f"{post_uri}:{post_cid}"}
 
                     ack = await self.js.publish(subject, payload, timeout=5.0, headers=headers)
                     if ack and ack.stream == self.output_stream:
