@@ -20,9 +20,7 @@ from .nats_client import StreamProcessorNatsClient
 from .sentiment import sentiment_analyzer
 from .health import create_health_api
 
-
 logger = get_logger(__name__)
-
 
 class StreamProcessorService:
     """Main service that orchestrates the stream processing pipeline."""

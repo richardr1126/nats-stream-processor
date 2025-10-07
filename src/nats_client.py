@@ -17,10 +17,9 @@ from .metrics import (
     message_queue_size
 )
 from .config import settings
-
+from .types import RawPost, EnrichedPost, SentimentData
 
 logger = get_logger(__name__)
-
 
 class StreamProcessorNatsClient:
     """NATS client for consuming from input stream and publishing to output stream."""
@@ -222,14 +221,14 @@ class StreamProcessorNatsClient:
             processing_errors_total.labels(error_type="message_handling").inc()
             # Don't ack on error - let it retry
 
-    async def publish_sentiment_result(self, original_post: Dict[str, Any], sentiment_data: Dict[str, Any]) -> None:
+    async def publish_sentiment_result(self, original_post: RawPost, sentiment_data: SentimentData) -> None:
         """Publish sentiment analysis results to the output stream."""
         if not self.js:
             raise RuntimeError("NATS client not connected")
         
         try:
             # Create enriched message with original post + sentiment
-            enriched_post = {
+            enriched_post: EnrichedPost = {
                 **original_post,
                 "sentiment": sentiment_data,
                 "processed_at": asyncio.get_event_loop().time(),
