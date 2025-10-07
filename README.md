@@ -68,9 +68,10 @@ Configure the service using environment variables:
 - `CONSUMER_NAME`: JetStream consumer name (default: `sentiment-processor`)
 - `QUEUE_GROUP`: Queue group name used for load-balanced consumption across replicas (default: same as `CONSUMER_NAME`)
 
-### Processing Settings
-- `PROCESSING_TIMEOUT`: Max seconds to wait for processing completion (default: `30`)
-- `MAX_RETRIES`: Maximum retry attempts for failed operations (default: `3`)
+### Processing / Consumer Settings
+- `ACK_WAIT_SECONDS`: JetStream ack wait before redelivery (default: `120`)
+- `MAX_DELIVER`: Max delivery attempts before JetStream stops redelivering (default: `5`)
+- `MAX_RETRIES`: Maximum retry attempts for publish operations (default: `3`)
 - `RETRY_DELAY`: Delay between retries in seconds (default: `1.0`)
 
 ### Sentiment Model Settings
@@ -257,7 +258,7 @@ The service uses **Twitter RoBERTa** fine-tuned for sentiment analysis:
 - **CPU Threads**: Adjust ONNX runtime threads in `sentiment.py`
 - **Confidence Threshold**: Lower `CONFIDENCE_THRESHOLD` for more results
 - **Memory**: Model uses ~300MB, total container ~512MB
-- **Processing Timeout**: Adjust `PROCESSING_TIMEOUT` for slower environments
+- **Ack Wait**: Increase `ACK_WAIT_SECONDS` if processing can exceed current ack wait during warm-up
 
 ## 🚢 Deployment to GKE
 
@@ -330,7 +331,7 @@ The service can be deployed using Helm charts or by building custom Kubernetes m
 3. **High Processing Time**:
    - Check CPU limits and model performance
    - Monitor inference duration metrics
-   - Verify `PROCESSING_TIMEOUT` settings
+   - Verify `ACK_WAIT_SECONDS` and `MAX_DELIVER` settings
 
 4. **Low Sentiment Results**:
    - Check `CONFIDENCE_THRESHOLD` setting

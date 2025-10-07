@@ -35,6 +35,8 @@ class StreamProcessorNatsClient:
         self.queue_group = settings.QUEUE_GROUP
         self.max_retries = settings.MAX_RETRIES
         self.stream_num_replicas = settings.NUM_STREAM_REPLICAS
+        self.ack_wait_seconds = settings.ACK_WAIT_SECONDS
+        self.max_deliver = settings.MAX_DELIVER
 
         self.nc: Optional[NATS] = None
         self.js: Optional[JetStreamContext] = None
@@ -116,77 +118,94 @@ class StreamProcessorNatsClient:
             self.js = None
 
     async def subscribe_to_posts(self, message_handler: Callable[[Dict[str, Any]], None]):
-        """Subscribe to the input stream and process messages."""
+        """Subscribe to the input stream and process messages.
+
+        Simplified approach: attempt to bind/create durable queue consumer via high-level subscribe.
+        If binding fails because consumer doesn't yet exist, explicitly create minimal consumer config
+        (without custom deliver_subject) and then subscribe again.
+        """
         if not self.js:
             raise RuntimeError("NATS client not connected")
-        
+
         self._message_handler = message_handler
-        
+
+        subject = f"{self.input_subject}.>"
+        logger.info(
+            "Setting up subscription",
+            stream=self.input_stream,
+            consumer=self.consumer_name,
+            queue_group=self.queue_group,
+            ack_wait=self.ack_wait_seconds,
+            max_deliver=self.max_deliver,
+        )
+
         try:
-            logger.info("Setting up subscription", 
-                       stream=self.input_stream, 
-                       consumer=self.consumer_name,
-                       queue_group=self.queue_group)
+            # Try direct bind/create via subscribe
+            self._subscription = await self.js.subscribe(
+                subject=subject,
+                stream=self.input_stream,
+                durable=self.consumer_name,
+                queue=self.queue_group,
+                cb=self._handle_message,
+                manual_ack=True,
+            )
+            logger.info("Bound to durable consumer (existing or implicit)", consumer=self.consumer_name)
+            return
+        except Exception as first_err:
+            logger.info("Initial subscribe failed, attempting explicit consumer creation", error=str(first_err))
 
-            subject = f"{self.input_subject}.>"
+        # Explicitly ensure consumer exists with updated ack/max_deliver tuning
+        consumer_config = ConsumerConfig(
+            durable_name=self.consumer_name,
+            deliver_policy=DeliverPolicy.ALL,
+            ack_policy=AckPolicy.EXPLICIT,
+            max_deliver=self.max_deliver,
+            ack_wait=self.ack_wait_seconds,
+            filter_subject=subject,
+        )
+        try:
+            await self.js.add_consumer(self.input_stream, consumer_config)
+            logger.info("Consumer created", consumer=self.consumer_name)
+        except Exception as add_err:
+            logger.info("Consumer create race or already exists", error=str(add_err))
 
-            # First try to bind to an existing durable consumer (typical for multi-pod)
-            try:
-                self._subscription = await self.js.subscribe(
-                    subject=subject,
-                    stream=self.input_stream,
-                    durable=self.consumer_name,
-                    queue=self.queue_group,
-                    cb=self._handle_message,
-                    manual_ack=True,
-                )
-                logger.info("Bound to existing durable consumer", stream=self.input_stream, consumer=self.consumer_name, queue_group=self.queue_group)
-            except Exception as bind_err:
-                logger.info("Consumer bind failed, ensuring consumer exists", error=str(bind_err))
-
-                # Create (or ensure) the durable consumer configured for queue group delivery
-                consumer_config = ConsumerConfig(
-                    name=self.consumer_name,
-                    durable_name=self.consumer_name,
-                    deliver_policy=DeliverPolicy.ALL,
-                    ack_policy=AckPolicy.EXPLICIT,
-                    max_deliver=3,
-                    ack_wait=30,  # 30 seconds to process and ack
-                    deliver_group=self.queue_group,
-                    deliver_subject="_INBOX.>",  # Required for queue group delivery
-                    filter_subject=subject,
-                )
-
-                # Attempt to add the consumer; if it already exists due to a race, ignore
-                try:
-                    await self.js.add_consumer(self.input_stream, consumer_config)
-                    logger.info("Created durable consumer", stream=self.input_stream, consumer=self.consumer_name, queue_group=self.queue_group)
-                except Exception as add_err:
-                    logger.info("Consumer may already exist, proceeding to bind", error=str(add_err))
-
-                # Bind again to the durable after ensuring it exists
-                self._subscription = await self.js.subscribe(
-                    subject=subject,
-                    stream=self.input_stream,
-                    durable=self.consumer_name,
-                    queue=self.queue_group,
-                    cb=self._handle_message,
-                    manual_ack=True,
-                )
-
-                logger.info("Subscription established (durable + queue group)",
-                            stream=self.input_stream,
-                            consumer=self.consumer_name,
-                            queue_group=self.queue_group)
-            
+        # Bind again
+        try:
+            self._subscription = await self.js.subscribe(
+                subject=subject,
+                stream=self.input_stream,
+                durable=self.consumer_name,
+                queue=self.queue_group,
+                cb=self._handle_message,
+                manual_ack=True,
+            )
+            logger.info(
+                "Subscription established",
+                stream=self.input_stream,
+                consumer=self.consumer_name,
+                queue_group=self.queue_group,
+            )
         except Exception as e:
-            logger.error("Failed to set up subscription", error=str(e))
+            logger.error("Failed to set up subscription after consumer ensure", error=str(e))
             processing_errors_total.labels(error_type="subscription_setup").inc()
             raise
 
     async def _handle_message(self, msg: Msg):
         """Handle incoming messages from the subscription."""
         try:
+            # Redelivery visibility
+            try:
+                md = msg.metadata
+                if md and md.num_delivered and md.num_delivered > 1:
+                    logger.warning(
+                        "redelivered_message",
+                        deliveries=md.num_delivered,
+                        stream_seq=md.sequence.stream if md.sequence else None,
+                        pending=md.num_pending if hasattr(md, 'num_pending') else None,
+                    )
+            except Exception:
+                pass
+
             # Check if message is empty
             if not msg.data or len(msg.data) == 0:
                 logger.warning("Received empty message, skipping")
@@ -244,7 +263,20 @@ class StreamProcessorNatsClient:
             attempt = 0
             while attempt <= self.max_retries:
                 try:
-                    ack = await self.js.publish(subject, payload, timeout=5.0)
+                    # Attempt idempotent publish using headers if supported.
+                    # JetStream server will treat messages with same Nats-Msg-Id inside duplicate window as duplicates.
+                    headers = None
+                    try:
+                        post_uri = original_post.get("uri") if isinstance(original_post, dict) else None
+                        post_cid = original_post.get("cid") if isinstance(original_post, dict) else None
+                        if post_uri and post_cid:
+                            from nats.aio.client import Headers
+                            headers = Headers()
+                            headers.add("Nats-Msg-Id", f"{post_uri}:{post_cid}")
+                    except Exception:
+                        headers = None
+
+                    ack = await self.js.publish(subject, payload, timeout=5.0, headers=headers)
                     if ack and ack.stream == self.output_stream:
                         posts_published_total.inc()
                         logger.debug("Published sentiment result", 

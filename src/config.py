@@ -17,7 +17,10 @@ class Settings:
 
     # Service
     SERVICE_NAME: str = os.getenv("SERVICE_NAME", "nats-stream-processor")
-    PROCESSING_TIMEOUT: int = int(os.getenv("PROCESSING_TIMEOUT", 30))
+
+    # Consumer tuning
+    ACK_WAIT_SECONDS: int = int(os.getenv("ACK_WAIT_SECONDS", 120))  # How long JetStream waits before redelivery
+    MAX_DELIVER: int = int(os.getenv("MAX_DELIVER", 5))  # Max redeliver attempts
 
     # Sentiment Model
     MODEL_NAME: str = os.getenv("MODEL_NAME", "onnx-community/twitter-roberta-base-sentiment-ONNX")
