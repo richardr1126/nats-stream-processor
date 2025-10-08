@@ -72,6 +72,8 @@ Configure the service using environment variables:
 - `ACK_WAIT_SECONDS`: JetStream ack wait before redelivery (default: `30`)
 - `MAX_DELIVER`: Max delivery attempts before JetStream stops redelivering (default: `3`)
 - `MAX_ACK_PENDING`: Max unacked messages in-flight per consumer - lower this to prevent resource contention during catch-up (default: `100`)
+- `MAX_RETRIES`: Maximum retry attempts for publish operations (default: `3`)
+- `RETRY_DELAY`: Delay between retries in seconds (default: `1.0`)
 - `DUPLICATE_WINDOW_SECONDS`: Output stream de-duplication window in seconds (default: `600` = 10 minutes)
 
 ### Sentiment Model Settings
