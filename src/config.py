@@ -19,8 +19,12 @@ class Settings:
     SERVICE_NAME: str = os.getenv("SERVICE_NAME", "nats-stream-processor")
 
     # Consumer tuning
-    ACK_WAIT_SECONDS: int = int(os.getenv("ACK_WAIT_SECONDS", 120))  # How long JetStream waits before redelivery
-    MAX_DELIVER: int = int(os.getenv("MAX_DELIVER", 5))  # Max redeliver attempts
+    ACK_WAIT_SECONDS: int = int(os.getenv("ACK_WAIT_SECONDS", 30))  # How long JetStream waits before redelivery
+    MAX_DELIVER: int = int(os.getenv("MAX_DELIVER", 3))  # Max redeliver attempts
+    MAX_ACK_PENDING: int = int(os.getenv("MAX_ACK_PENDING", 100))  # Max unacked messages in-flight per consumer
+    
+    # Output stream de-duplication window (in seconds)
+    DUPLICATE_WINDOW_SECONDS: int = int(os.getenv("DUPLICATE_WINDOW_SECONDS", 600))  # 10 minutes
 
     # Sentiment Model
     MODEL_NAME: str = os.getenv("MODEL_NAME", "onnx-community/twitter-roberta-base-sentiment-ONNX")

@@ -37,6 +37,8 @@ class StreamProcessorNatsClient:
         self.stream_num_replicas = settings.NUM_STREAM_REPLICAS
         self.ack_wait_seconds = settings.ACK_WAIT_SECONDS
         self.max_deliver = settings.MAX_DELIVER
+        self.max_ack_pending = settings.MAX_ACK_PENDING
+        self.duplicate_window = settings.DUPLICATE_WINDOW_SECONDS
 
         self.nc: Optional[NATS] = None
         self.js: Optional[JetStreamContext] = None
@@ -94,6 +96,7 @@ class StreamProcessorNatsClient:
                 max_age=0,
                 storage=StorageType.FILE,
                 num_replicas=self.stream_num_replicas,
+                duplicate_window=self.duplicate_window,  # Enable de-duplication via Nats-Msg-Id
             )
             await self.js.add_stream(config=stream_config)
             logger.info("Output stream created", stream=self.output_stream)
@@ -137,6 +140,7 @@ class StreamProcessorNatsClient:
             queue_group=self.queue_group,
             ack_wait=self.ack_wait_seconds,
             max_deliver=self.max_deliver,
+            max_ack_pending=self.max_ack_pending,
         )
 
         try:
@@ -154,13 +158,14 @@ class StreamProcessorNatsClient:
         except Exception as first_err:
             logger.info("Initial subscribe failed, attempting explicit consumer creation", error=str(first_err))
 
-        # Explicitly ensure consumer exists with updated ack/max_deliver tuning
+        # Explicitly ensure consumer exists with updated ack/max_deliver/max_ack_pending tuning
         consumer_config = ConsumerConfig(
             durable_name=self.consumer_name,
             deliver_policy=DeliverPolicy.ALL,
             ack_policy=AckPolicy.EXPLICIT,
             max_deliver=self.max_deliver,
             ack_wait=self.ack_wait_seconds,
+            max_ack_pending=self.max_ack_pending,  # Limit in-flight messages to prevent contention
             filter_subject=subject,
         )
         try:
@@ -274,10 +279,16 @@ class StreamProcessorNatsClient:
 
                     ack = await self.js.publish(subject, payload, timeout=5.0, headers=headers)
                     if ack and ack.stream == self.output_stream:
+                        # Check if JetStream detected this as a duplicate
+                        if ack.duplicate:
+                            logger.info("Duplicate detected by JetStream, not stored", 
+                                       msg_id=headers.get(api.Header.MSG_ID) if headers else None,
+                                       seq=ack.seq)
                         posts_published_total.inc()
                         logger.debug("Published sentiment result", 
                                    subject=subject, 
-                                   sentiment=sentiment_data.get("sentiment"))
+                                   sentiment=sentiment_data.get("sentiment"),
+                                   duplicate=ack.duplicate)
                         return
                         
                 except TimeoutError:

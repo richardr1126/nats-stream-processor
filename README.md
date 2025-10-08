@@ -64,15 +64,15 @@ Configure the service using environment variables:
 - `INPUT_STREAM`: Input JetStream stream name (default: `bluesky-posts`)
 - `OUTPUT_STREAM`: Output JetStream stream name (default: `bluesky-posts-sentiment`)
 - `INPUT_SUBJECT`: Input subject pattern (default: `bluesky.posts`)
-- `OUTPUT_SUBJECT`: Output subject prefix (default: `bluesky.posts.sentiment`)
+- `OUTPUT_SUBJECT`: Output subject prefix (default: `bluesky.sentiment`)
 - `CONSUMER_NAME`: JetStream consumer name (default: `sentiment-processor`)
 - `QUEUE_GROUP`: Queue group name used for load-balanced consumption across replicas (default: same as `CONSUMER_NAME`)
 
 ### Processing / Consumer Settings
-- `ACK_WAIT_SECONDS`: JetStream ack wait before redelivery (default: `120`)
-- `MAX_DELIVER`: Max delivery attempts before JetStream stops redelivering (default: `5`)
-- `MAX_RETRIES`: Maximum retry attempts for publish operations (default: `3`)
-- `RETRY_DELAY`: Delay between retries in seconds (default: `1.0`)
+- `ACK_WAIT_SECONDS`: JetStream ack wait before redelivery (default: `30`)
+- `MAX_DELIVER`: Max delivery attempts before JetStream stops redelivering (default: `3`)
+- `MAX_ACK_PENDING`: Max unacked messages in-flight per consumer - lower this to prevent resource contention during catch-up (default: `100`)
+- `DUPLICATE_WINDOW_SECONDS`: Output stream de-duplication window in seconds (default: `600` = 10 minutes)
 
 ### Sentiment Model Settings
 - `MODEL_NAME`: HuggingFace model name (default: `onnx-community/twitter-roberta-base-sentiment-ONNX`)
@@ -259,6 +259,7 @@ The service uses **Twitter RoBERTa** fine-tuned for sentiment analysis:
 - **Confidence Threshold**: Lower `CONFIDENCE_THRESHOLD` for more results
 - **Memory**: Model uses ~300MB, total container ~512MB
 - **Ack Wait**: Increase `ACK_WAIT_SECONDS` if processing can exceed current ack wait during warm-up
+- **Max Ack Pending**: Lower `MAX_ACK_PENDING` (e.g., 50-100) to prevent too many concurrent messages during catch-up, which can cause resource contention and slow processing
 
 ## 🚢 Deployment to GKE
 
