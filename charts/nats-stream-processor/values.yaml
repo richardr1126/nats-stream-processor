@@ -43,10 +43,10 @@ service:
 
 resources:
   requests:
-    memory: "3500Mi"
+    memory: "1000Mi"
     cpu: "3500m"
   limits:
-    memory: "3800Mi"
+    memory: "3000Mi"
     cpu: "3800m"
 
 livenessProbe:
@@ -107,7 +107,7 @@ tolerations:
 autoscaling:
   enabled: true
   minReplicas: 3
-  maxReplicas: 9  # Matches ML_MAX_NODES from gke-cluster.py
+  maxReplicas: 6  # Matches ML_MAX_NODES from gke-cluster.py
   targetCPUUtilizationPercentage: 70
   targetMemoryUtilizationPercentage: 80
   # Scale up quickly to handle burst traffic

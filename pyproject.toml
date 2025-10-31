@@ -8,11 +8,12 @@ dependencies = [
     "fastapi>=0.118.0",
     "nats-py>=2.11.0",
     "numpy>=2.3.3",
+    "onnx>=1.17.0",
     "optimum[onnxruntime]>=1.17.1",
     "prometheus-client>=0.23.1",
     "pydantic>=2.11.9",
     "python-dotenv>=1.1.1",
     "structlog>=25.4.0",
-    "transformers>=4.56.2",
+    "transformers[onnx]>=4.56.2",
     "uvicorn>=0.37.0",
 ]
