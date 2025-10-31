@@ -1,6 +1,20 @@
-# NATS Stream Processor
+# NATS Stream Processor (Unified)
 
-A high-performance Python microservice for processing Bluesky posts with Twitter RoBERTa sentiment analysis using ONNX Runtime for fast CPU inference. This service subscribes to NATS JetStream, performs sentiment classification, and publishes enriched data for real-time dashboards.
+A high-performance Python microservice for processing Bluesky posts with **unified sentiment and topic classification** using ONNX Runtime for fast CPU inference. This service subscribes to NATS JetStream, performs **sentiment analysis first**, then **topic classification**, and publishes enriched data with both insights for real-time dashboards.
+
+## 🚀 Features
+
+- **Real-time Stream Processing**: Consumes posts from NATS JetStream with backpressure handling
+- **Unified Processing Pipeline**: Performs sentiment analysis first, followed by topic classification on the same post
+- **Fast CPU Inference**: 
+  - Twitter RoBERTa ONNX model for sentiment (3-class: positive/negative/neutral)
+  - Tweet-Topic-21 ONNX model for multi-label topic classification (19 topics)
+- **Sequential Processing**: Sentiment inference → Topic inference → Combined output
+- **Individual Message Processing**: Processes each post individually for low-latency analysis
+- **High Confidence Filtering**: Only publishes results above configurable confidence thresholds
+- **Production Ready**: Health checks, Prometheus metrics, structured logging, and Kubernetes deployment
+- **Containerized**: Docker image with model caching and optimization
+- **Observable**: Comprehensive metrics for processing rate, sentiment distribution, topic distribution, and performance
 
 ## 🚀 Quickstart
 
@@ -31,10 +45,9 @@ python main.py
 git clone https://github.com/richardr1126/nats-stream-processor.git
 cd nats-stream-processor
 
-```bash
 # Configure environment variables
-cp charts/.env.example charts/.env
-# Edit charts/.env with your NATS configuration
+cp .env.example .env.prod
+# Edit .env.prod with your NATS configuration
 # Note: Production uses 'bluesky-posts' stream, local development uses 'bluesky-posts-dev'
 
 # Deploy to Kubernetes
@@ -43,18 +56,6 @@ cd charts
 helm install nats-stream-processor ./nats-stream-processor
 ```
 
-## 🚀 Features
-
-- **Real-time Stream Processing**: Consumes posts from NATS JetStream with backpressure handling
-- **Fast CPU Sentiment Analysis**: Twitter RoBERTa ONNX model optimized for social media text with CPU optimizations
-- **Individual Message Processing**: Processes each post individually for low-latency sentiment analysis
-- **3-Class Sentiment**: Detects positive, negative, and neutral sentiment with confidence scores
-- **Production Ready**: Health checks, Prometheus metrics, structured logging, and Kubernetes deployment
-- **High Confidence Filtering**: Only publishes sentiment results above configurable confidence threshold
-- **Containerized**: Docker image with model caching and optimization
-- **Observable**: Comprehensive metrics for processing rate, sentiment distribution, and performance
-- **Mock Data Support**: Built-in mock data generator for testing and development
-
 ## ⚙️ Configuration
 
 Configure the service using environment variables:
@@ -62,10 +63,10 @@ Configure the service using environment variables:
 ### NATS Settings
 - `NATS_URL`: NATS server URL (default: `nats://nats.nats.svc.cluster.local:4222`)
 - `INPUT_STREAM`: Input JetStream stream name (default: `bluesky-posts`)
-- `OUTPUT_STREAM`: Output JetStream stream name (default: `bluesky-posts-sentiment`)
+- `OUTPUT_STREAM`: Output JetStream stream name (default: `bluesky-posts-enriched`)
 - `INPUT_SUBJECT`: Input subject pattern (default: `bluesky.posts`)
-- `OUTPUT_SUBJECT`: Output subject prefix (default: `bluesky.sentiment`)
-- `CONSUMER_NAME`: JetStream consumer name (default: `sentiment-processor`)
+- `OUTPUT_SUBJECT`: Output subject prefix (default: `bluesky.enriched`)
+- `CONSUMER_NAME`: JetStream consumer name (default: `unified-processor`)
 - `QUEUE_GROUP`: Queue group name used for load-balanced consumption across replicas (default: same as `CONSUMER_NAME`)
 
 ### Processing / Consumer Settings
@@ -77,10 +78,16 @@ Configure the service using environment variables:
 - `DUPLICATE_WINDOW_SECONDS`: Output stream de-duplication window in seconds (default: `600` = 10 minutes)
 
 ### Sentiment Model Settings
-- `MODEL_NAME`: HuggingFace model name (default: `onnx-community/twitter-roberta-base-sentiment-ONNX`)
-- `MODEL_CACHE_DIR`: Local model cache directory (default: `/var/cache/models`)
-- `MAX_SEQUENCE_LENGTH`: Maximum text sequence length (default: `512`)
-- `CONFIDENCE_THRESHOLD`: Minimum confidence to publish results (default: `0.4`)
+- `SENTIMENT_MODEL_NAME`: HuggingFace model name (default: `onnx-community/twitter-roberta-base-sentiment-ONNX`)
+- `SENTIMENT_MODEL_CACHE_DIR`: Local sentiment model cache directory (default: `/var/cache/models/sentiment`)
+- `SENTIMENT_MAX_SEQUENCE_LENGTH`: Maximum text sequence length (default: `512`)
+- `SENTIMENT_CONFIDENCE_THRESHOLD`: Minimum confidence to publish results (default: `0.4`)
+
+### Topic Classification Model Settings
+- `TOPIC_MODEL_NAME`: HuggingFace model name (default: `richardr1126/tweet-topic-21-multi-ONNX`)
+- `TOPIC_MODEL_CACHE_DIR`: Local topic model cache directory (default: `/var/cache/models/topics`)
+- `TOPIC_MAX_SEQUENCE_LENGTH`: Maximum text sequence length (default: `512`)
+- `TOPIC_SIGMOID_THRESHOLD`: Sigmoid threshold for multi-label classification (default: `0.5`)
 
 ### Monitoring Settings
 - `HEALTH_CHECK_PORT`: Health check server port (default: `8080`)
@@ -93,21 +100,25 @@ Configure the service using environment variables:
 ```mermaid
 graph LR
     A[NATS Input Stream] --> B[Message Processor]
-    B --> C[Twitter RoBERTa ONNX]
-    C --> D[Confidence Filter]
-    D --> E[NATS Output Stream]
+    B --> C[1. Twitter RoBERTa<br/>Sentiment ONNX]
+    C --> D[2. Tweet Topic<br/>Classifier ONNX]
+    D --> E[Combine Results]
+    E --> F[NATS Output Stream]
     
-    F[Health Server] --> G[Prometheus Metrics]
-    H[Model Cache] --> C
+    G[Health Server] --> H[Prometheus Metrics]
+    I[Model Caches] --> C
+    I --> D
 ```
 
 ### Processing Pipeline
 
 1. **Message Consumption**: JetStream consumer with manual acknowledgment
-2. **Text Preprocessing**: Tokenization and padding for Twitter RoBERTa
-3. **ONNX Inference**: Fast CPU-optimized sentiment classification (3-class: positive/negative/neutral)
-4. **Confidence Filtering**: Only publish high-confidence predictions
-5. **Result Publishing**: Enriched posts with sentiment data to output stream
+2. **Text Preprocessing**: Tokenization and padding for both models
+3. **Sentiment Analysis (First)**: Twitter RoBERTa ONNX inference (3-class: positive/negative/neutral)
+4. **Confidence Filtering**: Skip if sentiment confidence is too low
+5. **Topic Classification (Second)**: Multi-label topic classification (19 topics)
+6. **Result Combination**: Merge sentiment and topic data
+7. **Publishing**: Enriched posts with both sentiment and topics to output stream
 
 ### Message Format
 
@@ -121,7 +132,7 @@ graph LR
 }
 ```
 
-**Output Message** (enriched with sentiment):
+**Output Message** (enriched with sentiment and topics):
 ```json
 {
   "uri": "at://did:plc:abc123/app.bsky.feed.post/xyz789",
@@ -136,6 +147,18 @@ graph LR
       "neutral": 0.04,
       "positive": 0.94
     }
+  },
+  "topics": {
+    "topics": ["daily_life", "wellness"],
+    "probabilities": {
+      "arts_&_culture": 0.12,
+      "business_&_entrepreneurs": 0.05,
+      "daily_life": 0.78,
+      "wellness": 0.62,
+      ...
+    },
+    "top_topic": "daily_life",
+    "top_confidence": 0.78
   },
   "processed_at": 1698765432.123,
   "processor": "nats-stream-processor"
@@ -153,11 +176,13 @@ graph LR
 ### Key Metrics
 
 - `stream_processor_posts_processed_total` - Total posts processed
-- `stream_processor_posts_published_total` - Posts successfully published with sentiment
+- `stream_processor_posts_published_total` - Posts successfully published with sentiment and topics
 - `stream_processor_sentiment_predictions_total{sentiment}` - Predictions by sentiment type
-- `stream_processor_sentiment_confidence` - Histogram of confidence scores
-- `stream_processor_processing_duration_seconds` - Individual post processing time
-- `stream_processor_model_inference_duration_seconds` - Model inference time
+- `stream_processor_sentiment_confidence` - Histogram of sentiment confidence scores
+- `stream_processor_topic_predictions_total{topic}` - Predictions by topic
+- `stream_processor_topic_confidence` - Histogram of topic confidence scores
+- `stream_processor_processing_duration_seconds` - Individual post processing time (total)
+- `stream_processor_model_inference_duration_seconds{model}` - Model inference time (sentiment/topic)
 - `stream_processor_message_queue_size` - Current message queue size
 - `stream_processor_nats_connected` - NATS connection status
 - `stream_processor_errors_total{error_type}` - Total processing errors by type
@@ -194,11 +219,13 @@ stream_processor_errors_total{error_type="single_analysis"} 2
 nats-stream-processor/
 ├── src/
 │   ├── config.py           # Configuration management
-│   ├── sentiment.py        # DistilBERT ONNX sentiment analyzer
+│   ├── sentiment.py        # Twitter RoBERTa ONNX sentiment analyzer
+│   ├── topic_classifier.py # Tweet-Topic-21 ONNX topic classifier
 │   ├── nats_client.py      # JetStream consumer/producer
-│   ├── service.py          # Main service orchestration
+│   ├── service.py          # Main service orchestration (unified pipeline)
 │   ├── health.py           # Health check endpoints
 │   ├── metrics.py          # Prometheus metrics
+│   ├── types.py            # Type definitions
 │   └── logging_setup.py    # Structured logging
 ├── main.py                 # Entry point
 ├── Dockerfile              # Container build
@@ -207,18 +234,27 @@ nats-stream-processor/
 └── README.md              # This file
 ```
 
-### Sentiment Model Details
+### Model Details
 
-The service uses **Twitter RoBERTa** fine-tuned for sentiment analysis:
+#### Sentiment Model: Twitter RoBERTa
 
 - **Model**: `onnx-community/twitter-roberta-base-sentiment-ONNX` from HuggingFace
 - **Training Data**: Fine-tuned on Twitter data, optimized for social media text
-- **Runtime**: ONNX Runtime with CPU optimizations, uses quantized int8 model for better performance
-- **Performance**: ~5-20ms inference per individual post
-- **Memory**: ~512MB including model weights
-- **Classes**: 3-class sentiment classification (positive/negative/neutral)
+- **Runtime**: ONNX Runtime with CPU optimizations, uses quantized int8 model
+- **Performance**: ~5-20ms inference per post
+- **Memory**: ~256MB including model weights
+- **Classes**: 3-class sentiment (positive/negative/neutral)
 - **Label Mapping**: LABEL_0=negative, LABEL_1=neutral, LABEL_2=positive
-- **Advantage**: Better performance on short social media posts compared to generic models
+
+#### Topic Model: Tweet-Topic-21
+
+- **Model**: `richardr1126/tweet-topic-21-multi-ONNX` from HuggingFace
+- **Training Data**: Fine-tuned on tweet data for multi-label classification
+- **Runtime**: ONNX Runtime with CPU optimizations, quantized model
+- **Performance**: ~10-30ms inference per post
+- **Memory**: ~256MB including model weights
+- **Topics**: 19 predefined topics (multi-label)
+- **Threshold**: Sigmoid threshold of 0.5 for topic inclusion
 
 ### Testing the Pipeline
 
@@ -252,65 +288,26 @@ The service uses **Twitter RoBERTa** fine-tuned for sentiment analysis:
    nats stream view bluesky-posts-dev
    
    # View messages in output stream (development)
-   nats stream view bluesky-posts-sentiment-dev
+   nats stream view bluesky-posts-enriched-dev
    ```
 
 ### Performance Tuning
 
-- **CPU Threads**: Adjust ONNX runtime threads in `sentiment.py`
-- **Confidence Threshold**: Lower `CONFIDENCE_THRESHOLD` for more results
-- **Memory**: Model uses ~300MB, total container ~512MB
+- **CPU Threads**: Adjust ONNX runtime threads in model files
+- **Confidence Thresholds**: Adjust `SENTIMENT_CONFIDENCE_THRESHOLD` and `TOPIC_SIGMOID_THRESHOLD`
+- **Memory**: Both models use ~512MB total, container ~1GB recommended
 - **Ack Wait**: Increase `ACK_WAIT_SECONDS` if processing can exceed current ack wait during warm-up
-- **Max Ack Pending**: Lower `MAX_ACK_PENDING` (e.g., 50-100) to prevent too many concurrent messages during catch-up, which can cause resource contention and slow processing
-
-## 🚢 Deployment to GKE
-
-The service can be deployed using Helm charts or by building custom Kubernetes manifests.
-
-1. **Ensure prerequisites**:
-   ```bash
-   # Check NATS is running
-   kubectl get pods -n nats
-   
-   # Verify input stream exists
-   kubectl exec -it deployment/nats-box -n nats -- nats stream list
-   ```
-
-2. **Build and push container image**:
-   ```bash
-   # Build and tag image
-   docker build -t gcr.io/your-project/nats-stream-processor:latest .
-   
-   # Push to registry
-   docker push gcr.io/your-project/nats-stream-processor:latest
-   ```
-
-3. **Deploy the service** (create your own Kubernetes manifests or Helm chart):
-   ```bash
-   # Example deployment
-   kubectl apply -f k8s-deployment.yaml
-   ```
-
-4. **Monitor deployment**:
-   ```bash
-   # Check pod status
-   kubectl get pods -l app=nats-stream-processor
-   
-   # View logs
-   kubectl logs -f deployment/nats-stream-processor
-   
-   # Check health
-   kubectl port-forward svc/nats-stream-processor 8080:8080
-   curl http://localhost:8080/health
-   ```
+- **Max Ack Pending**: Lower `MAX_ACK_PENDING` (e.g., 50-100) to prevent resource contention during catch-up
 
 ## 🎯 Performance Characteristics
 
-- **Throughput**: 50-200 posts/second (individual processing)
-- **Latency**: 5-20ms processing time per post
-- **Memory**: 512MB typical usage, 1GB limit recommended
-- **CPU**: 200-500m typical usage, 1000m limit recommended
-- **Model Load Time**: ~5-10 seconds on first startup
+- **Throughput**: 30-100 posts/second (sequential sentiment + topic processing)
+- **Latency**: 15-50ms total processing time per post
+  - Sentiment: 5-20ms
+  - Topic: 10-30ms
+- **Memory**: 1GB typical usage, 2GB limit recommended
+- **CPU**: 500-1000m typical usage, 2000m limit recommended
+- **Model Load Time**: ~10-20 seconds on first startup (both models)
 
 ## 🔍 Troubleshooting
 
@@ -332,14 +329,14 @@ The service can be deployed using Helm charts or by building custom Kubernetes m
    ```
 
 3. **High Processing Time**:
-   - Check CPU limits and model performance
-   - Monitor inference duration metrics
+   - Check CPU limits and both model performance
+   - Monitor inference duration metrics for sentiment and topic models
    - Verify `ACK_WAIT_SECONDS` and `MAX_DELIVER` settings
 
-4. **Low Sentiment Results**:
-   - Check `CONFIDENCE_THRESHOLD` setting
+4. **Low Results**:
+   - Check `SENTIMENT_CONFIDENCE_THRESHOLD` and `TOPIC_SIGMOID_THRESHOLD` settings
    - Verify input text quality and length
-   - Monitor confidence histogram metrics
+   - Monitor confidence histogram metrics for both models
 
 5. **Connection Issues**:
    - Verify NATS_URL configuration
@@ -353,10 +350,10 @@ The service can be deployed using Helm charts or by building custom Kubernetes m
 kubectl logs deployment/nats-stream-processor | jq 'select(.level=="debug")'
 
 # Check consumer lag
-kubectl exec -it deployment/nats-box -n nats -- nats consumer info bluesky-posts sentiment-processor
+kubectl exec -it deployment/nats-box -n nats -- nats consumer info bluesky-posts unified-processor
 
 # For local development
-docker-compose exec nats-box nats consumer info bluesky-posts-dev sentiment-processor-dev
+docker-compose exec nats-box nats consumer info bluesky-posts-dev unified-processor-dev
 
 # Monitor metrics
 kubectl port-forward svc/nats-stream-processor 8080:8080 &
@@ -369,10 +366,15 @@ kubectl exec -it deployment/nats-box -n nats -- nats stream info bluesky-posts
 docker-compose run --rm nats-stream-processor python -c "
 import asyncio
 from src.sentiment import sentiment_analyzer
+from src.topic_classifier import topic_classifier
 async def test():
     await sentiment_analyzer.initialize()
-    result = await sentiment_analyzer.analyze_sentiment('This is a test message')
-    print(result)
+    await topic_classifier.initialize()
+    text = 'This is a great day for technology news!'
+    sentiment = await sentiment_analyzer.analyze_sentiment(text)
+    topics = await topic_classifier.classify_topics(text)
+    print('Sentiment:', sentiment)
+    print('Topics:', topics)
 asyncio.run(test())
 "
 ```
@@ -403,7 +405,7 @@ This service is configured to safely scale horizontally without consumer name co
 To verify the consumer setup:
 
 ```bash
-kubectl exec -it deployment/nats-box -n nats -- nats consumer info bluesky-posts sentiment-processor
+kubectl exec -it deployment/nats-box -n nats -- nats consumer info bluesky-posts unified-processor
 ```
 
 ## 🤝 Contributing

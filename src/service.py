@@ -15,9 +15,11 @@ from .metrics import (
     processing_duration_seconds,
     message_queue_size,
     sentiment_predictions_total,
+    topic_predictions_total,
 )
 from .nats_client import StreamProcessorNatsClient
 from .sentiment import sentiment_analyzer
+from .topic_classifier import topic_classifier
 from .health import create_health_api
 
 logger = get_logger(__name__)
@@ -54,6 +56,10 @@ class StreamProcessorService:
             # Initialize sentiment analyzer
             logger.info("Initializing sentiment analyzer")
             await sentiment_analyzer.initialize()
+            
+            # Initialize topic classifier
+            logger.info("Initializing topic classifier")
+            await topic_classifier.initialize()
             
             # Connect to NATS
             logger.info("Connecting to NATS")
@@ -92,7 +98,7 @@ class StreamProcessorService:
             logger.error("Health server error", error=str(e))
 
     async def _process_message(self, post_data: Dict[str, Any]):
-        """Process a single message for sentiment analysis."""
+        """Process a single message for sentiment and topic analysis."""
         start_time = time.time()
         
         try:
@@ -100,35 +106,45 @@ class StreamProcessorService:
             posts_processed_total.inc()
             logger.debug("Processing message")
             
-            # Extract text for sentiment analysis
+            # Extract text for analysis
             text = self._extract_text_from_post(post_data)
             if not text or len(text.strip()) == 0:
                 logger.debug("No valid text found in message")
                 return
             
-            # Perform sentiment analysis
+            # Step 1: Perform sentiment analysis first
             sentiment_result = await sentiment_analyzer.analyze_sentiment(text)
             
-            if sentiment_result:
-                # Publish result
-                try:
-                    await self.nats_client.publish_sentiment_result(
-                        post_data, sentiment_result
-                    )
-                    
-                    # Update metrics
-                    processing_time = time.time() - start_time
-                    processing_duration_seconds.observe(processing_time)
-                    
-                    logger.debug("Message processed", 
-                                sentiment=sentiment_result["sentiment"],
-                                confidence=sentiment_result["confidence"])
-                    
-                except Exception as e:
-                    logger.error("Failed to publish sentiment result", 
-                               error=str(e), post_uri=post_data.get("uri"))
-            else:
-                logger.debug("No sentiment result (low confidence)")
+            if not sentiment_result:
+                logger.debug("No sentiment result (low confidence), skipping topic classification")
+                return
+            
+            # Step 2: Perform topic classification
+            topic_result = await topic_classifier.classify_topics(text)
+            
+            if not topic_result:
+                logger.debug("No topic result")
+                return
+            
+            # Step 3: Publish combined results
+            try:
+                await self.nats_client.publish_enriched_result(
+                    post_data, sentiment_result, topic_result
+                )
+                
+                # Update metrics
+                processing_time = time.time() - start_time
+                processing_duration_seconds.observe(processing_time)
+                
+                logger.debug("Message processed", 
+                            sentiment=sentiment_result["sentiment"],
+                            sentiment_confidence=sentiment_result["confidence"],
+                            topics=topic_result["topics"],
+                            top_topic=topic_result["top_topic"])
+                
+            except Exception as e:
+                logger.error("Failed to publish enriched result", 
+                           error=str(e), post_uri=post_data.get("uri"))
             
         except Exception as e:
             logger.error("Error processing message", error=str(e))
@@ -186,13 +202,27 @@ class StreamProcessorService:
                 negative_count = sentiment_predictions_total.labels(sentiment="negative")._value.get()
                 neutral_count = sentiment_predictions_total.labels(sentiment="neutral")._value.get()
                 
+                # Get topic distribution (top 5 topics)
+                topic_counts = {}
+                if topic_classifier.id2label:
+                    for topic in topic_classifier.id2label.values():
+                        try:
+                            count = topic_predictions_total.labels(topic=topic)._value.get()
+                            if count > 0:
+                                topic_counts[topic] = int(count)
+                        except:
+                            pass
+                
+                # Sort by count and get top 5
+                top_topics = sorted(topic_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+                
                 # Calculate publish rate (percentage of processed that were published)
                 publish_rate = (published_per_20s / messages_per_20s * 100) if messages_per_20s > 0 else 0
                 
                 # Format stats with multi-line output
                 stats_msg = (
                     "\n" + "="*30 +
-                    "\n  Stream Processor Statistics" +
+                    "\n  Unified Processor Statistics" +
                     "\n" + "="*30 +
                     "\n  Processing Rates:" +
                     f"\n    Processed/sec:     {round(messages_per_second, 2)}" +
@@ -208,8 +238,13 @@ class StreamProcessorService:
                     f"\n    Positive:          {int(positive_count)}" +
                     f"\n    Negative:          {int(negative_count)}" +
                     f"\n    Neutral:           {int(neutral_count)}" +
-                    "\n" + "="*30
+                    "\n  Top Topics:"
                 )
+                
+                for topic, count in top_topics:
+                    stats_msg += f"\n    {topic:15s}:  {count}"
+                
+                stats_msg += "\n" + "="*30
                 logger.info(stats_msg)
                 
                 # Update for next iteration

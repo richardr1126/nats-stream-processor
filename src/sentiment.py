@@ -30,10 +30,10 @@ class SentimentAnalyzer:
     async def initialize(self) -> None:
         """Load the ONNX model using transformers pipeline."""
         try:
-            logger.info("Initializing sentiment analyzer", model=settings.MODEL_NAME)
+            logger.info("Initializing sentiment analyzer", model=settings.SENTIMENT_MODEL_NAME)
             
             # Create model cache directory
-            os.makedirs(settings.MODEL_CACHE_DIR, exist_ok=True)
+            os.makedirs(settings.SENTIMENT_MODEL_CACHE_DIR, exist_ok=True)
             
             # Load the ONNX model using optimum and create pipeline
             logger.info("Loading ONNX model with pipeline")
@@ -42,15 +42,15 @@ class SentimentAnalyzer:
             def load_model():
                 # Load ONNX model and tokenizer separately to ensure we use the ONNX version
                 model = ORTModelForSequenceClassification.from_pretrained(
-                    settings.MODEL_NAME,
-                    cache_dir=settings.MODEL_CACHE_DIR,
+                    settings.SENTIMENT_MODEL_NAME,
+                    cache_dir=settings.SENTIMENT_MODEL_CACHE_DIR,
                     subfolder="onnx",
                     file_name="model_int8.onnx",
                 )
                 
                 tokenizer = AutoTokenizer.from_pretrained(
-                    settings.MODEL_NAME,
-                    cache_dir=settings.MODEL_CACHE_DIR,
+                    settings.SENTIMENT_MODEL_NAME,
+                    cache_dir=settings.SENTIMENT_MODEL_CACHE_DIR,
                 )
                 
                 # Fix the model config to have the correct label mappings
@@ -65,7 +65,7 @@ class SentimentAnalyzer:
                     device=-1,  # CPU inference
                     top_k=None,  # Get probabilities for all classes (replaces deprecated return_all_scores)
                     truncation=True,
-                    max_length=settings.MAX_SEQUENCE_LENGTH,
+                    max_length=settings.SENTIMENT_MAX_SEQUENCE_LENGTH,
                 )
             
             # Run model loading in thread pool to avoid blocking event loop
@@ -96,7 +96,7 @@ class SentimentAnalyzer:
             raw_results = await loop.run_in_executor(None, self.classifier, [text])
             
             inference_time = time.time() - start_time
-            model_inference_duration_seconds.observe(inference_time)
+            model_inference_duration_seconds.labels(model="sentiment").observe(inference_time)
             
             # Process result - the classifier returns a list for batch input
             # Since we passed [text], we get back a list with one element
@@ -133,11 +133,11 @@ class SentimentAnalyzer:
             }
             
             # Only return high-confidence predictions
-            if confidence >= settings.CONFIDENCE_THRESHOLD:
+            if confidence >= settings.SENTIMENT_CONFIDENCE_THRESHOLD:
                 return result
             else:
                 logger.debug("Low confidence prediction filtered out", 
-                            confidence=confidence, threshold=settings.CONFIDENCE_THRESHOLD)
+                            confidence=confidence, threshold=settings.SENTIMENT_CONFIDENCE_THRESHOLD)
                 return None
             
         except Exception as e:

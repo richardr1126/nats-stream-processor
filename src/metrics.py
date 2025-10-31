@@ -4,12 +4,12 @@ from prometheus_client import Counter, Gauge, Histogram
 # Processing metrics
 posts_processed_total = Counter(
     "stream_processor_posts_processed_total",
-    "Total posts processed for sentiment analysis",
+    "Total posts processed for sentiment and topic analysis",
 )
 
 posts_published_total = Counter(
     "stream_processor_posts_published_total",
-    "Posts successfully published with sentiment",
+    "Posts successfully published with sentiment and topics",
 )
 
 processing_errors_total = Counter(
@@ -31,16 +31,30 @@ sentiment_confidence = Histogram(
     buckets=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
 )
 
+# Topic classification metrics
+topic_predictions_total = Counter(
+    "stream_processor_topic_predictions_total",
+    "Total topic predictions made",
+    ["topic"],
+)
+
+topic_confidence = Histogram(
+    "stream_processor_topic_confidence",
+    "Topic prediction confidence scores",
+    buckets=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+)
+
 # Performance metrics
 processing_duration_seconds = Histogram(
     "stream_processor_processing_duration_seconds",
     "Time taken to process individual posts",
-    buckets=[0.01, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0],
+    buckets=[0.01, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0],
 )
 
 model_inference_duration_seconds = Histogram(
     "stream_processor_model_inference_duration_seconds",
     "Time taken for model inference",
+    ["model"],
     buckets=[0.01, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0],
 )
 

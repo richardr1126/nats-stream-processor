@@ -17,7 +17,7 @@ from .metrics import (
     message_queue_size
 )
 from .config import settings
-from .types import RawPost, EnrichedPost, SentimentData
+from .types import RawPost, EnrichedPost, SentimentData, TopicData
 
 logger = get_logger(__name__)
 
@@ -145,55 +145,27 @@ class StreamProcessorNatsClient:
 
         try:
             # Try direct bind/create via subscribe
+            consumer_config = ConsumerConfig(
+                durable_name=self.consumer_name,
+                deliver_policy=DeliverPolicy.ALL,
+                ack_policy=AckPolicy.EXPLICIT,
+                max_deliver=self.max_deliver,
+                ack_wait=self.ack_wait_seconds,
+                max_ack_pending=self.max_ack_pending,  # Limit in-flight messages to prevent contention
+                filter_subject=subject,
+            )
             self._subscription = await self.js.subscribe(
                 subject=subject,
                 stream=self.input_stream,
                 durable=self.consumer_name,
                 queue=self.queue_group,
                 cb=self._handle_message,
-                manual_ack=True,
+                config=consumer_config
             )
             logger.info("Bound to durable consumer (existing or implicit)", consumer=self.consumer_name)
             return
         except Exception as first_err:
             logger.info("Initial subscribe failed, attempting explicit consumer creation", error=str(first_err))
-
-        # Explicitly ensure consumer exists with updated ack/max_deliver/max_ack_pending tuning
-        consumer_config = ConsumerConfig(
-            durable_name=self.consumer_name,
-            deliver_policy=DeliverPolicy.ALL,
-            ack_policy=AckPolicy.EXPLICIT,
-            max_deliver=self.max_deliver,
-            ack_wait=self.ack_wait_seconds,
-            max_ack_pending=self.max_ack_pending,  # Limit in-flight messages to prevent contention
-            filter_subject=subject,
-        )
-        try:
-            await self.js.add_consumer(self.input_stream, consumer_config)
-            logger.info("Consumer created", consumer=self.consumer_name)
-        except Exception as add_err:
-            logger.info("Consumer create race or already exists", error=str(add_err))
-
-        # Bind again
-        try:
-            self._subscription = await self.js.subscribe(
-                subject=subject,
-                stream=self.input_stream,
-                durable=self.consumer_name,
-                queue=self.queue_group,
-                cb=self._handle_message,
-                manual_ack=True,
-            )
-            logger.info(
-                "Subscription established",
-                stream=self.input_stream,
-                consumer=self.consumer_name,
-                queue_group=self.queue_group,
-            )
-        except Exception as e:
-            logger.error("Failed to set up subscription after consumer ensure", error=str(e))
-            processing_errors_total.labels(error_type="subscription_setup").inc()
-            raise
 
     async def _handle_message(self, msg: Msg):
         """Handle incoming messages from the subscription."""
@@ -245,25 +217,27 @@ class StreamProcessorNatsClient:
             processing_errors_total.labels(error_type="message_handling").inc()
             # Don't ack on error - let it retry
 
-    async def publish_sentiment_result(self, original_post: RawPost, sentiment_data: SentimentData) -> None:
-        """Publish sentiment analysis results to the output stream."""
+    async def publish_enriched_result(self, original_post: RawPost, sentiment_data: SentimentData, topic_data: TopicData) -> None:
+        """Publish combined sentiment and topic analysis results to the output stream."""
         if not self.js:
             raise RuntimeError("NATS client not connected")
         
         try:
-            # Create enriched message with original post + sentiment
+            # Create enriched message with original post + sentiment + topics
             enriched_post: EnrichedPost = {
                 **original_post,
                 "sentiment": sentiment_data,
+                "topics": topic_data,
                 "processed_at": asyncio.get_event_loop().time(),
                 "processor": settings.SERVICE_NAME
             }
             
             payload = json.dumps(enriched_post, default=str).encode('utf-8')
             
-            # Determine subject suffix (could be based on sentiment, author, etc.)
-            subject_suffix = sentiment_data.get("sentiment", "unknown")
-            subject = f"{self.output_subject}.{subject_suffix}"
+            # Determine subject suffix (could combine sentiment and top topic)
+            sentiment = sentiment_data.get("sentiment", "unknown")
+            top_topic = topic_data.get("top_topic", "unknown")
+            subject = f"{self.output_subject}.{sentiment}.{top_topic}"
             
             attempt = 0
             while attempt <= self.max_retries:
@@ -285,9 +259,10 @@ class StreamProcessorNatsClient:
                                        msg_id=headers.get(api.Header.MSG_ID) if headers else None,
                                        seq=ack.seq)
                         posts_published_total.inc()
-                        logger.debug("Published sentiment result", 
+                        logger.debug("Published enriched result", 
                                    subject=subject, 
-                                   sentiment=sentiment_data.get("sentiment"),
+                                   sentiment=sentiment,
+                                   topics=topic_data.get("topics"),
                                    duplicate=ack.duplicate)
                         return
                         
@@ -306,7 +281,7 @@ class StreamProcessorNatsClient:
                                  attempt=attempt)
                     
         except Exception as e:
-            logger.error("Failed to publish sentiment result", error=str(e))
+            logger.error("Failed to publish enriched result", error=str(e))
             processing_errors_total.labels(error_type="publish_failed").inc()
             raise
 
