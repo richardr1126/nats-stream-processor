@@ -2,7 +2,8 @@
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 
-replicaCount: 6
+# Note: replicaCount is ignored when autoscaling.enabled=true
+replicaCount: 3
 
 image:
   repository: ghcr.io/richardr1126/nats-stream-processor
@@ -42,11 +43,11 @@ service:
 
 resources:
   requests:
-    memory: "3Gi"
+    memory: "3500Mi"
     cpu: "3500m"
   limits:
-    memory: "3Gi"
-    cpu: "3500m"
+    memory: "3800Mi"
+    cpu: "3800m"
 
 livenessProbe:
   httpGet:
@@ -102,21 +103,32 @@ tolerations:
     value: "ml"
     effect: "NoSchedule"
 
+# Pod anti-affinity to ensure one pod per node
 affinity:
   podAntiAffinity:
-    preferredDuringSchedulingIgnoredDuringExecution:
-      - weight: 100
-        podAffinityTerm:
-          labelSelector:
-            matchLabels:
-              app.kubernetes.io/name: nats-stream-processor
-          topologyKey: kubernetes.io/hostname
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchExpressions:
+            - key: app.kubernetes.io/name
+              operator: In
+              values:
+                - nats-stream-processor
+        topologyKey: kubernetes.io/hostname
 
-# Topology spread constraints to evenly distribute pods across nodes
-topologySpreadConstraints:
-  - maxSkew: 1
-    topologyKey: kubernetes.io/hostname
-    whenUnsatisfiable: ScheduleAnyway
-    labelSelector:
-      matchLabels:
-        app.kubernetes.io/name: nats-stream-processor
+# Horizontal Pod Autoscaler configuration
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 9  # Matches ML_MAX_NODES from gke-cluster.py
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+  # Scale up quickly to handle burst traffic
+  scaleUpStabilizationWindowSeconds: 0
+  scaleUpPercentage: 100  # Double replicas
+  scaleUpPods: 2          # Or add 2 pods
+  scaleUpPeriodSeconds: 30
+  # Scale down slowly to avoid thrashing
+  scaleDownStabilizationWindowSeconds: 300  # 5 minutes
+  scaleDownPercentage: 50  # Remove half
+  scaleDownPods: 1         # Or remove 1 pod
+  scaleDownPeriodSeconds: 60

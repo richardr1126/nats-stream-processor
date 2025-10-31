@@ -301,13 +301,40 @@ nats-stream-processor/
 
 ## 🎯 Performance Characteristics
 
-- **Throughput**: 30-100 posts/second (sequential sentiment + topic processing)
-- **Latency**: 15-50ms total processing time per post
-  - Sentiment: 5-20ms
-  - Topic: 10-30ms
-- **Memory**: 1GB typical usage, 2GB limit recommended
-- **CPU**: 500-1000m typical usage, 2000m limit recommended
-- **Model Load Time**: ~10-20 seconds on first startup (both models)
+### Unified Processing (Sentiment + Topic)
+- **Throughput**: 20-40 posts/second per pod (sequential sentiment + topic processing)
+- **Latency**: 25-75ms total processing time per post
+  - Sentiment: 10-35ms (Twitter RoBERTa ONNX)
+  - Topic: 15-40ms (Tweet-Topic-21 ONNX)
+- **Memory**: ~3.5GB per pod (both models loaded + processing)
+- **CPU**: ~3.5 vCPUs per pod under load
+- **Model Load Time**: ~15-30 seconds on first startup (both models)
+
+### Resource Requirements per Pod (1 Pod per Node Strategy)
+- **Requests**: 3.5 vCPUs, 3.5GB RAM
+- **Limits**: 3.8 vCPUs, 3.8GB RAM
+- **Node Capacity**: Each n2d-highcpu-4 node (4 vCPUs, 4GB RAM) fits **exactly 1 pod**
+- **Reasoning**: High resource requests ensure pods spread across nodes, triggering cluster autoscaler
+
+### Scaling Calculations
+
+**For sustained load processing:**
+- Expected throughput: ~30 posts/sec per pod (average)
+- With 3 pods (minimum): ~90 posts/sec sustained
+- With 6 pods (typical): ~180 posts/sec sustained
+- With 9 pods (maximum): ~270 posts/sec sustained
+
+**Node requirements (1:1 pod-to-node ratio):**
+- Minimum (3 pods): 3 ML nodes
+- Typical (6 pods): 6 ML nodes
+- Maximum (9 pods): 9 ML nodes
+
+**HPA & Cluster Autoscaler:**
+- HPA scales pods based on CPU utilization (70% target)
+- Each new pod triggers GKE Cluster Autoscaler to provision a new node
+- Min replicas: 3, Max replicas: 9
+- Fast scale-up (30s), slow scale-down (5min stabilization)
+- `topologySpreadConstraints` with `DoNotSchedule` enforces 1 pod per node
 
 ## 🔍 Troubleshooting
 
@@ -390,9 +417,78 @@ This service integrates with:
 
 ## 📈 Scaling
 
-- **Horizontal (recommended)**: Run multiple replicas using the same durable consumer (`CONSUMER_NAME`) and a shared queue group (`QUEUE_GROUP`). The service will bind to the durable and use queue semantics so each message is delivered to only one replica.
-- **Vertical**: Increase CPU/memory limits for higher throughput
-- **Model**: Consider GPU deployment for very high throughput (requires CUDA ONNX provider)
+### Horizontal Pod Autoscaling (HPA) + GKE Cluster Autoscaler
+
+The service uses **HPA with cluster autoscaling** for automatic scaling:
+
+```yaml
+# values.yaml
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 9
+  targetCPUUtilizationPercentage: 70
+
+# 1 pod per node strategy
+resources:
+  requests:
+    cpu: "3500m"
+    memory: "3500Mi"
+topologySpreadConstraints:
+  - whenUnsatisfiable: DoNotSchedule  # Enforces 1 pod per node
+```
+
+**How it works:**
+1. **HPA monitors CPU**: When CPU > 70%, HPA increases replica count
+2. **Pod requests trigger nodes**: High resource requests (3.5 vCPUs) mean only 1 pod fits per node
+3. **Cluster autoscaler provisions nodes**: GKE automatically adds nodes when pods are pending
+4. **Result**: Each new replica = 1 new node (up to 9 nodes max)
+
+**Scaling behavior:**
+- **Scale up**: Aggressive (30s period, doubles replicas or adds 2 pods)
+- **Scale down**: Conservative (5min stabilization, removes 50% or 1 pod)
+- **Trigger**: CPU utilization > 70% triggers scale up
+
+**Verify autoscaling:**
+```bash
+# Check HPA status
+kubectl get hpa nats-stream-processor
+
+# Watch HPA in action
+kubectl get hpa nats-stream-processor --watch
+
+# Check cluster autoscaler events
+kubectl get events --sort-by='.lastTimestamp' | grep cluster-autoscaler
+```
+
+**Manual scaling (if HPA disabled):**
+```bash
+# Scale to specific replica count (will trigger node provisioning)
+kubectl scale deployment nats-stream-processor --replicas=6
+
+# Or update values.yaml and helm upgrade
+helm upgrade nats-stream-processor ./nats-stream-processor \
+  --set replicaCount=6 \
+  --set autoscaling.enabled=false
+```
+
+### Capacity Planning
+
+**Rule of thumb (1 pod per node):**
+- 1 pod processes ~30 posts/sec sustained
+- 1 pod = 1 n2d-highcpu-4 node (4 vCPUs, 4GB RAM)
+- For X posts/sec, you need ⌈X/30⌉ pods = ⌈X/30⌉ nodes
+
+**Examples:**
+- 100 posts/sec → 4 pods → 4 nodes
+- 200 posts/sec → 7 pods → 7 nodes
+- 300 posts/sec → 9 pods (max) → 9 nodes
+
+**Cost optimization:**
+- Minimum 3 nodes during normal operation
+- Scales down to 0 when idle (if you scale ML pool to 0)
+- Each n2d-highcpu-4 spot node: ~$5-8/month
+- 3-9 nodes range: ~$15-72/month
 
 ### Multi-pod setup with JetStream durables and queue groups
 

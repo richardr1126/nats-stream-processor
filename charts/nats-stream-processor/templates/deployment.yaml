@@ -5,7 +5,9 @@ metadata:
   labels:
     {{- include "nats-stream-processor.labels" . | nindent 4 }}
 spec:
+  {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "nats-stream-processor.selectorLabels" . | nindent 6 }}

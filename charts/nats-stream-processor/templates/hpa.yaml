@@ -1,0 +1,53 @@
+{{- if .Values.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "nats-stream-processor.fullname" . }}
+  labels:
+    {{- include "nats-stream-processor.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "nats-stream-processor.fullname" . }}
+  minReplicas: {{ .Values.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas }}
+  metrics:
+    {{- if .Values.autoscaling.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}
+    {{- end }}
+    {{- if .Values.autoscaling.targetMemoryUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.targetMemoryUtilizationPercentage }}
+    {{- end }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: {{ .Values.autoscaling.scaleDownStabilizationWindowSeconds }}
+      policies:
+      - type: Percent
+        value: {{ .Values.autoscaling.scaleDownPercentage }}
+        periodSeconds: {{ .Values.autoscaling.scaleDownPeriodSeconds }}
+      - type: Pods
+        value: {{ .Values.autoscaling.scaleDownPods }}
+        periodSeconds: {{ .Values.autoscaling.scaleDownPeriodSeconds }}
+      selectPolicy: Min
+    scaleUp:
+      stabilizationWindowSeconds: {{ .Values.autoscaling.scaleUpStabilizationWindowSeconds }}
+      policies:
+      - type: Percent
+        value: {{ .Values.autoscaling.scaleUpPercentage }}
+        periodSeconds: {{ .Values.autoscaling.scaleUpPeriodSeconds }}
+      - type: Pods
+        value: {{ .Values.autoscaling.scaleUpPods }}
+        periodSeconds: {{ .Values.autoscaling.scaleUpPeriodSeconds }}
+      selectPolicy: Max
+{{- end }}
