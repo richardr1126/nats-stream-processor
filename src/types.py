@@ -20,7 +20,6 @@ class SentimentData(TypedDict):
 class TopicData(TypedDict):
     """Topic classification result."""
     topics: List[str]  # List of identified topics
-    probabilities: Dict[str, float]  # All topic probabilities
     top_topic: str  # Topic with highest confidence
     top_confidence: float
 

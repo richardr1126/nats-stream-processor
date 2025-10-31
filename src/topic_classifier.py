@@ -131,6 +131,11 @@ class TopicClassifier:
             top_topic = sorted_results[0][0] if sorted_results else "unknown"
             top_confidence = sorted_results[0][1] if sorted_results else 0.0
             
+            # Always include top_topic in topics array, even if below threshold
+            # This ensures NATS routing matches what's displayed in UI
+            if top_topic != "unknown" and top_topic not in topics:
+                topics.append(top_topic)
+            
             # Update metrics for each identified topic
             for topic in topics:
                 topic_predictions_total.labels(topic=topic).inc()
@@ -139,7 +144,6 @@ class TopicClassifier:
             
             classification_result = {
                 "topics": topics,
-                "probabilities": probabilities,
                 "top_topic": top_topic,
                 "top_confidence": top_confidence,
             }
