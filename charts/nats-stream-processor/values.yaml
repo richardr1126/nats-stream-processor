@@ -103,18 +103,6 @@ tolerations:
     value: "ml"
     effect: "NoSchedule"
 
-# Pod anti-affinity to ensure one pod per node
-affinity:
-  podAntiAffinity:
-    requiredDuringSchedulingIgnoredDuringExecution:
-      - labelSelector:
-          matchExpressions:
-            - key: app.kubernetes.io/name
-              operator: In
-              values:
-                - nats-stream-processor
-        topologyKey: kubernetes.io/hostname
-
 # Horizontal Pod Autoscaler configuration
 autoscaling:
   enabled: true
