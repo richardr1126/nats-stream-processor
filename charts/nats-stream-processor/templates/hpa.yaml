@@ -42,21 +42,13 @@ spec:
     scaleDown:
       stabilizationWindowSeconds: {{ .Values.autoscaling.scaleDownStabilizationWindowSeconds }}
       policies:
-      - type: Percent
-        value: {{ .Values.autoscaling.scaleDownPercentage }}
-        periodSeconds: {{ .Values.autoscaling.scaleDownPeriodSeconds }}
       - type: Pods
         value: {{ .Values.autoscaling.scaleDownPods }}
         periodSeconds: {{ .Values.autoscaling.scaleDownPeriodSeconds }}
-      selectPolicy: Min
     scaleUp:
       stabilizationWindowSeconds: {{ .Values.autoscaling.scaleUpStabilizationWindowSeconds }}
       policies:
-      - type: Percent
-        value: {{ .Values.autoscaling.scaleUpPercentage }}
-        periodSeconds: {{ .Values.autoscaling.scaleUpPeriodSeconds }}
       - type: Pods
         value: {{ .Values.autoscaling.scaleUpPods }}
         periodSeconds: {{ .Values.autoscaling.scaleUpPeriodSeconds }}
-      selectPolicy: Max
 {{- end }}
