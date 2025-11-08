@@ -108,8 +108,11 @@ autoscaling:
   enabled: true
   minReplicas: 3
   maxReplicas: 6  # Matches ML_MAX_NODES from gke-cluster.py
-  targetCPUUtilizationPercentage: 70
-  # targetMemoryUtilizationPercentage: 80  # Disabled - only scale on CPU
+  # targetCPUUtilizationPercentage: 70  # Disabled - only scale on queue size
+  # targetMemoryUtilizationPercentage: 80  # Disabled - only scale on queue size
+  # Custom metric: scale based on pending message queue size
+  # Set to desired average queue size per pod (e.g., 50 means scale up when queue > 50)
+  targetQueueSize: 100
   # Scale up quickly to handle burst traffic
   scaleUpStabilizationWindowSeconds: 0
   scaleUpPercentage: 100  # Double replicas
@@ -120,3 +123,12 @@ autoscaling:
   scaleDownPercentage: 50  # Remove half
   scaleDownPods: 1         # Or remove 1 pod
   scaleDownPeriodSeconds: 60
+
+# Prometheus metrics configuration
+metrics:
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    scrapeTimeout: 10s
+    # Additional labels for ServiceMonitor (optional)
+    additionalLabels: {}

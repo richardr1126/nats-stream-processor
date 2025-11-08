@@ -29,6 +29,15 @@ spec:
           type: Utilization
           averageUtilization: {{ .Values.autoscaling.targetMemoryUtilizationPercentage }}
     {{- end }}
+    {{- if .Values.autoscaling.targetQueueSize }}
+    - type: Pods
+      pods:
+        metric:
+          name: stream_processor_message_queue_size
+        target:
+          type: AverageValue
+          averageValue: "{{ .Values.autoscaling.targetQueueSize }}"
+    {{- end }}
   behavior:
     scaleDown:
       stabilizationWindowSeconds: {{ .Values.autoscaling.scaleDownStabilizationWindowSeconds }}
