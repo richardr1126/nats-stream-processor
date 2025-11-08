@@ -106,13 +106,14 @@ tolerations:
 # Horizontal Pod Autoscaler configuration
 autoscaling:
   enabled: true
-  minReplicas: 3
+  initialReplicas: 3
+  minReplicas: 1
   maxReplicas: 6  # Matches ML_MAX_NODES from gke-cluster.py
   # targetCPUUtilizationPercentage: 70  # Disabled - only scale on queue size
   # targetMemoryUtilizationPercentage: 80  # Disabled - only scale on queue size
   # Custom metric: scale based on pending message queue size
   # Set to desired average queue size per pod (e.g., 50 means scale up when queue > 50)
-  targetQueueSize: 100
+  targetQueueSize: 200
   # Scale up quickly to handle burst traffic
   scaleUpStabilizationWindowSeconds: 0
   scaleUpPercentage: 100  # Double replicas
