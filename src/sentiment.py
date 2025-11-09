@@ -1,10 +1,11 @@
 import os
 import asyncio
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 import time
+import numpy as np
 
-from transformers import pipeline, AutoTokenizer
-from optimum.onnxruntime import ORTModelForSequenceClassification
+from transformers import AutoTokenizer
+import onnxruntime as ort
 
 from .config import settings
 from .logging_setup import get_logger
@@ -19,58 +20,57 @@ logger = get_logger(__name__)
 
 
 class SentimentAnalyzer:
-    """Twitter RoBERTa-based sentiment analyzer using Transformers pipeline with ONNX optimization."""
+    """Twitter RoBERTa-based sentiment analyzer using pure ONNX Runtime inference."""
     
     def __init__(self):
-        self.classifier = None
+        self.session = None
+        self.tokenizer = None
         # Twitter RoBERTa model uses these labels: LABEL_0=negative, LABEL_1=neutral, LABEL_2=positive
-        self.label_mapping = {"LABEL_0": "negative", "LABEL_1": "neutral", "LABEL_2": "positive"}
+        self.label_mapping = {0: "negative", 1: "neutral", 2: "positive"}
         self._model_loaded = False
         
     async def initialize(self) -> None:
-        """Load the ONNX model using transformers pipeline."""
+        """Load the ONNX model and tokenizer."""
         try:
             logger.info("Initializing sentiment analyzer", model=settings.SENTIMENT_MODEL_NAME)
             
             # Create model cache directory
             os.makedirs(settings.SENTIMENT_MODEL_CACHE_DIR, exist_ok=True)
             
-            # Load the ONNX model using optimum and create pipeline
-            logger.info("Loading ONNX model with pipeline")
-            
             # Load model in a thread to avoid blocking
             def load_model():
-                # Load ONNX model and tokenizer separately to ensure we use the ONNX version
-                model = ORTModelForSequenceClassification.from_pretrained(
-                    settings.SENTIMENT_MODEL_NAME,
-                    cache_dir=settings.SENTIMENT_MODEL_CACHE_DIR,
-                    subfolder="onnx",
-                    file_name="model_int8.onnx",
-                )
-                
+                # Load tokenizer
                 tokenizer = AutoTokenizer.from_pretrained(
                     settings.SENTIMENT_MODEL_NAME,
                     cache_dir=settings.SENTIMENT_MODEL_CACHE_DIR,
                 )
                 
-                # Fix the model config to have the correct label mappings
-                # Twitter RoBERTa sentiment model should have these labels
-                model.config.id2label = {0: "LABEL_0", 1: "LABEL_1", 2: "LABEL_2"}
-                model.config.label2id = {"LABEL_0": 0, "LABEL_1": 1, "LABEL_2": 2}
-                
-                return pipeline(
-                    "text-classification",
-                    model=model,
-                    tokenizer=tokenizer,
-                    device=-1,  # CPU inference
-                    top_k=None,  # Get probabilities for all classes (replaces deprecated return_all_scores)
-                    truncation=True,
-                    max_length=settings.SENTIMENT_MAX_SEQUENCE_LENGTH,
+                # Download model files to cache
+                from huggingface_hub import hf_hub_download
+                model_path = hf_hub_download(
+                    repo_id=settings.SENTIMENT_MODEL_NAME,
+                    filename="onnx/model_int8.onnx",
+                    cache_dir=settings.SENTIMENT_MODEL_CACHE_DIR,
                 )
+                
+                # Create ONNX Runtime session with CPU execution provider
+                sess_options = ort.SessionOptions()
+                sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+                # Use all available CPU threads for better performance
+                # intra_op_num_threads controls parallelism within ops (default uses all cores)
+                sess_options.inter_op_num_threads = 0  # 0 means use all available
+                
+                session = ort.InferenceSession(
+                    model_path,
+                    sess_options=sess_options,
+                    providers=['CPUExecutionProvider']
+                )
+                
+                return session, tokenizer
             
             # Run model loading in thread pool to avoid blocking event loop
             loop = asyncio.get_event_loop()
-            self.classifier = await loop.run_in_executor(None, load_model)
+            self.session, self.tokenizer = await loop.run_in_executor(None, load_model)
             
             self._model_loaded = True
             logger.info("Sentiment analyzer initialized successfully")
@@ -93,51 +93,18 @@ class SentimentAnalyzer:
             
             # Run inference in thread pool to avoid blocking
             loop = asyncio.get_event_loop()
-            raw_results = await loop.run_in_executor(None, self.classifier, [text])
+            result = await loop.run_in_executor(None, self._run_inference, text)
             
             inference_time = time.time() - start_time
             model_inference_duration_seconds.labels(model="sentiment").observe(inference_time)
             
-            # Process result - the classifier returns a list for batch input
-            # Since we passed [text], we get back a list with one element
-            if isinstance(raw_results, list) and len(raw_results) > 0:
-                text_results = raw_results[0]  # Get the results for our single text
-            else:
-                raise ValueError(f"Unexpected classifier output format: {type(raw_results)}")
-            
-            # Find the prediction with highest score
-            best_prediction = max(text_results, key=lambda x: x['score'])
-            sentiment = self.label_mapping.get(best_prediction['label'], best_prediction['label'])
-            confidence = best_prediction['score']
-            confidence = best_prediction['score']
-            
-            # Create probabilities dict for all classes
-            probabilities = {}
-            for pred in text_results:
-                label_name = self.label_mapping.get(pred['label'], pred['label'])
-                probabilities[label_name] = pred['score']
-            
-            # Ensure all three classes are present
-            for class_name in ['negative', 'neutral', 'positive']:
-                if class_name not in probabilities:
-                    probabilities[class_name] = 0.0
-            
-            # Update metrics
-            sentiment_predictions_total.labels(sentiment=sentiment).inc()
-            sentiment_confidence.observe(confidence)
-            
-            result = {
-                "sentiment": sentiment,
-                "confidence": confidence,
-                "probabilities": probabilities
-            }
-            
             # Only return high-confidence predictions
-            if confidence >= settings.SENTIMENT_CONFIDENCE_THRESHOLD:
+            if result["confidence"] >= settings.SENTIMENT_CONFIDENCE_THRESHOLD:
                 return result
             else:
                 logger.debug("Low confidence prediction filtered out", 
-                            confidence=confidence, threshold=settings.SENTIMENT_CONFIDENCE_THRESHOLD)
+                            confidence=result["confidence"], 
+                            threshold=settings.SENTIMENT_CONFIDENCE_THRESHOLD)
                 return None
             
         except Exception as e:
@@ -146,6 +113,52 @@ class SentimentAnalyzer:
                         error_type=type(e).__name__)
             processing_errors_total.labels(error_type="single_analysis").inc()
             raise
+    
+    def _run_inference(self, text: str) -> Dict:
+        """Run ONNX inference on text (synchronous method for thread pool)."""
+        # Tokenize input
+        inputs = self.tokenizer(
+            text,
+            truncation=True,
+            max_length=settings.SENTIMENT_MAX_SEQUENCE_LENGTH,
+            padding="max_length",
+            return_tensors="np"
+        )
+        
+        # Prepare ONNX inputs
+        onnx_inputs = {
+            "input_ids": inputs["input_ids"].astype(np.int64),
+            "attention_mask": inputs["attention_mask"].astype(np.int64),
+        }
+        
+        # Run inference
+        outputs = self.session.run(None, onnx_inputs)
+        logits = outputs[0][0]  # Shape: [num_labels]
+        
+        # Apply softmax to get probabilities
+        exp_logits = np.exp(logits - np.max(logits))
+        probabilities_array = exp_logits / exp_logits.sum()
+        
+        # Get prediction
+        predicted_class = int(np.argmax(probabilities_array))
+        confidence = float(probabilities_array[predicted_class])
+        sentiment = self.label_mapping[predicted_class]
+        
+        # Create probabilities dict for all classes
+        probabilities = {
+            self.label_mapping[i]: float(probabilities_array[i])
+            for i in range(len(probabilities_array))
+        }
+        
+        # Update metrics
+        sentiment_predictions_total.labels(sentiment=sentiment).inc()
+        sentiment_confidence.observe(confidence)
+        
+        return {
+            "sentiment": sentiment,
+            "confidence": confidence,
+            "probabilities": probabilities
+        }
 
 
 # Global sentiment analyzer instance

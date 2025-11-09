@@ -43,8 +43,8 @@ service:
 
 resources:
   requests:
-    memory: "3000Mi"
-    cpu: "4000m"
+    memory: "1500Mi"
+    cpu: "3500m"
   limits:
     memory: "3000Mi"
     cpu: "4000m"
@@ -107,20 +107,20 @@ tolerations:
 autoscaling:
   enabled: true
   initialReplicas: 3
-  minReplicas: 2
+  minReplicas: 3
   maxReplicas: 6  # Matches ML_MAX_NODES from gke-cluster.py
   # targetCPUUtilizationPercentage: 70  # Disabled - only scale on queue size
   # targetMemoryUtilizationPercentage: 80  # Disabled - only scale on queue size
   # Custom metric: scale based on pending message queue size
   # Set to desired average queue size per pod (e.g., 50 means scale up when queue > 50)
-  targetQueueSize: 200
+  targetQueueSize: 500
   # Scale up parameters
-  scaleUpPeriodSeconds: 120  # Check every 2 minutes
-  scaleUpStabilizationWindowSeconds: 180   # Wait 3 minutes
+  scaleUpPeriodSeconds: 240  # Check every 4 minutes
+  scaleUpStabilizationWindowSeconds: 300  # Wait 5 minutes
   scaleUpPods: 1          # Add 1 pod
   # Scale down parameters
-  scaleDownPeriodSeconds: 120 # Check every 3 minutes
-  scaleDownStabilizationWindowSeconds: 300  # Wait 5 minutes
+  scaleDownPeriodSeconds: 480 # Check every 8 minutes
+  scaleDownStabilizationWindowSeconds: 600  # Wait 10 minutes
   scaleDownPods: 1         # Remove 1 pod
 
 # Prometheus metrics configuration
