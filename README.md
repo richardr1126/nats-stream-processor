@@ -95,6 +95,18 @@ Configure the service using environment variables:
 - `LOG_LEVEL`: Logging level (default: `INFO`)
 - `LOG_FORMAT`: Log format - `json` or `console` (default: `json`)
 
+### Environment File Comparison (.env.example vs .env.prod)
+
+| Variable | .env.example | .env.prod | Notes |
+|----------|-------------|-----------|-------|
+| `NUM_STREAM_REPLICAS` | `1` | `3` | Increased for HA in production |
+| `SENTIMENT_MODEL_CACHE_DIR` | `./models/sentiment` | `/var/cache/models/sentiment` | Absolute path for containerized env |
+| `TOPIC_MODEL_CACHE_DIR` | `./models/topics` | `/var/cache/models/topics` | Absolute path for containerized env |
+| `SENTIMENT_CONFIDENCE_THRESHOLD` | `0.4` | `0.3` | Lower threshold in production for more detections |
+| All others | Same as .env.prod | See .env.example | Same for dev and prod |
+
+**Before deploying to Kubernetes**, ensure you have created and configured `.env.prod` in the service root directory. The `create-secrets.sh` script will fail if this file is missing.
+
 ## 🏗 Architecture
 
 ```mermaid
