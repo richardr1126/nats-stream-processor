@@ -19,6 +19,12 @@ from .metrics import (
 logger = get_logger(__name__)
 
 
+def _softmax(logits: np.ndarray) -> np.ndarray:
+    m = np.max(logits)
+    exps = np.exp(logits - m)
+    return exps / exps.sum()
+
+
 class SentimentAnalyzer:
     """Twitter RoBERTa-based sentiment analyzer using pure ONNX Runtime inference."""
     
@@ -58,7 +64,9 @@ class SentimentAnalyzer:
                 sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
                 # Use all available CPU threads for better performance
                 # intra_op_num_threads controls parallelism within ops (default uses all cores)
-                sess_options.inter_op_num_threads = 0  # 0 means use all available
+                sess_options.intra_op_num_threads = 0  # 0 = use all available
+                # Allow parallel execution across ops if runtime decides
+                sess_options.inter_op_num_threads = 0
                 
                 session = ort.InferenceSession(
                     model_path,
@@ -91,9 +99,8 @@ class SentimentAnalyzer:
         try:
             start_time = time.time()
             
-            # Run inference in thread pool to avoid blocking
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, self._run_inference, text)
+            # Run inference directly (ONNX Runtime releases the GIL for heavy ops)
+            result = self._run_inference(text)
             
             inference_time = time.time() - start_time
             model_inference_duration_seconds.labels(model="sentiment").observe(inference_time)
@@ -115,20 +122,27 @@ class SentimentAnalyzer:
             raise
     
     def _run_inference(self, text: str) -> Dict:
-        """Run ONNX inference on text (synchronous method for thread pool)."""
+        """Run ONNX inference on text."""
         # Tokenize input
         inputs = self.tokenizer(
             text,
             truncation=True,
             max_length=settings.SENTIMENT_MAX_SEQUENCE_LENGTH,
-            padding="max_length",
+            padding=False,
             return_tensors="np"
         )
         
         # Prepare ONNX inputs
+        input_ids = inputs["input_ids"]
+        attn = inputs["attention_mask"]
+        if input_ids.dtype != np.int64:
+            input_ids = input_ids.astype(np.int64, copy=False)
+        if attn.dtype != np.int64:
+            attn = attn.astype(np.int64, copy=False)
+
         onnx_inputs = {
-            "input_ids": inputs["input_ids"].astype(np.int64),
-            "attention_mask": inputs["attention_mask"].astype(np.int64),
+            "input_ids": input_ids,
+            "attention_mask": attn,
         }
         
         # Run inference
@@ -136,8 +150,7 @@ class SentimentAnalyzer:
         logits = outputs[0][0]  # Shape: [num_labels]
         
         # Apply softmax to get probabilities
-        exp_logits = np.exp(logits - np.max(logits))
-        probabilities_array = exp_logits / exp_logits.sum()
+        probabilities_array = _softmax(logits)
         
         # Get prediction
         predicted_class = int(np.argmax(probabilities_array))

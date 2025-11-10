@@ -19,6 +19,10 @@ from .metrics import (
 logger = get_logger(__name__)
 
 
+def _sigmoid(x: np.ndarray) -> np.ndarray:
+    return 1 / (1 + np.exp(-x))
+
+
 class TopicClassifier:
     """Multi-label topic classifier using tweet-topic-21-multi model with pure ONNX Runtime.
     
@@ -68,8 +72,8 @@ class TopicClassifier:
                 sess_options = ort.SessionOptions()
                 sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
                 # Use all available CPU threads for better performance
-                # intra_op_num_threads controls parallelism within ops (default uses all cores)
-                sess_options.inter_op_num_threads = 0  # 0 means use all available
+                sess_options.intra_op_num_threads = 0  # 0 = use all cores
+                sess_options.inter_op_num_threads = 0  # Let runtime decide
                 
                 session = ort.InferenceSession(
                     model_path,
@@ -108,9 +112,8 @@ class TopicClassifier:
         try:
             start_time = time.time()
             
-            # Run inference in thread pool to avoid blocking
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, self._run_inference, text)
+            # Direct inference (ONNX Runtime releases GIL internally)
+            result = self._run_inference(text)
             
             inference_time = time.time() - start_time
             model_inference_duration_seconds.labels(model="topic").observe(inference_time)
@@ -125,20 +128,27 @@ class TopicClassifier:
             raise
     
     def _run_inference(self, text: str) -> Dict:
-        """Run ONNX inference on text (synchronous method for thread pool)."""
+        """Run ONNX inference on text."""
         # Tokenize input
         inputs = self.tokenizer(
             text,
             truncation=True,
-            padding="max_length",
-            max_length=512,  # Standard max length for RoBERTa
+            max_length=settings.TOPIC_MAX_SEQUENCE_LENGTH,
+            padding=False,
             return_tensors="np"
         )
         
         # Prepare ONNX inputs
+        input_ids = inputs["input_ids"]
+        attn = inputs["attention_mask"]
+        if input_ids.dtype != np.int64:
+            input_ids = input_ids.astype(np.int64, copy=False)
+        if attn.dtype != np.int64:
+            attn = attn.astype(np.int64, copy=False)
+
         onnx_inputs = {
-            "input_ids": inputs["input_ids"].astype(np.int64),
-            "attention_mask": inputs["attention_mask"].astype(np.int64),
+            "input_ids": input_ids,
+            "attention_mask": attn,
         }
         
         # Run inference
@@ -146,7 +156,7 @@ class TopicClassifier:
         logits = outputs[0][0]  # Shape: [num_labels]
         
         # Apply sigmoid for multi-label classification
-        sigmoid_scores = 1 / (1 + np.exp(-logits))
+        sigmoid_scores = _sigmoid(logits)
         
         # Process results - filter by sigmoid threshold
         topics = []
